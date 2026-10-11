@@ -1,0 +1,23 @@
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { accessSync, constants } from "node:fs";
+import { fileURLToPath } from "node:url";
+import test from "node:test";
+
+const installerPath = fileURLToPath(new URL("../install.sh", import.meta.url));
+
+test("installer is executable, syntactically valid, and documents its usage", () => {
+  assert.doesNotThrow(() => accessSync(installerPath, constants.X_OK));
+
+  const syntaxCheck = spawnSync("bash", ["-n", installerPath], {
+    encoding: "utf8",
+  });
+  assert.equal(syntaxCheck.status, 0, syntaxCheck.stderr);
+
+  const help = spawnSync(installerPath, ["--help"], {
+    encoding: "utf8",
+  });
+  assert.equal(help.status, 0, help.stderr);
+  assert.match(help.stdout, /sudo \.\/install\.sh/);
+  assert.match(help.stdout, /one-use enrollment token/);
+});

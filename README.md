@@ -15,47 +15,26 @@ unprivileged systemd service and does not execute commands remotely.
 1. Run `/enroll` in the monitoring Discord server and keep the one-use token
    private. The command returns `XGS_MONITOR_URL` and
    `XGS_MONITOR_ENROLLMENT_TOKEN`.
-2. On the monitored server, clone this public agent-only repository and build:
+2. On the monitored server, clone this public agent-only repository and run
+   its installer:
 
    ```sh
    git clone https://github.com/xgshost/xgs-monitoring-agent.git /opt/xgs-monitoring-agent
    cd /opt/xgs-monitoring-agent
-   npm ci
-   npm run build
+   sudo ./install.sh
    ```
 
-3. Create the unprivileged service user and protected environment file:
+The installer verifies Debian/Ubuntu, installs Node.js 22 through the signed
+NodeSource APT repository when needed, builds and tests the agent, creates its
+non-root service account, installs the systemd unit, and starts the service. It
+prompts for the monitoring URL and one-use token without echoing the token.
 
-   ```sh
-   sudo useradd --system --user-group --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin xgs-monitor-agent
-   sudo install -o root -g xgs-monitor-agent -m 0640 /dev/null /etc/xgs-monitor-agent.env
-   sudoedit /etc/xgs-monitor-agent.env
-   ```
-
-   Add the two values returned by `/enroll`. Do not put the enrollment token in
-   shell history or share it. The agent saves its exchanged credential under
-   `/var/lib/xgs-monitor-agent/` with owner-only permissions. Remove the
-   enrollment token from the environment file after enrollment succeeds.
-
-4. Journal access must be approved for each host before changing permissions.
-   On systems where `systemd-journal` is the appropriate read-access group,
-   an administrator can grant access with:
-
-   ```sh
-   sudo usermod -aG systemd-journal xgs-monitor-agent
-   ```
-
-   This group may expose journal entries from all services to the agent; the
-   agent itself only processes SSH authentication entries. Keep the service
-   unprivileged.
-
-5. Install and start the systemd unit:
-
-   ```sh
-   sudo install -o root -g root -m 0644 deploy/systemd/xgs-monitor-agent.service /etc/systemd/system/xgs-monitor-agent.service
-   sudo systemctl daemon-reload
-   sudo systemctl enable --now xgs-monitor-agent
-   ```
+Before granting journal access, it explains that the
+`systemd-journal` group permits reading all system journal entries; the agent
+itself processes only SSH authentication entries. Approve this separately for
+each host. If enrollment succeeds, the installer removes the spent token from
+the protected environment file. If it times out, the token remains there so
+the agent can retry; inspect the service logs before requesting a new token.
 
 ## Update
 
@@ -66,6 +45,8 @@ cd /opt/xgs-monitoring-agent
 git pull --ff-only
 npm ci
 npm run build
+npm test
+npm prune --omit=dev
 sudo systemctl restart xgs-monitor-agent
 ```
 
