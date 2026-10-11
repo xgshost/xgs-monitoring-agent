@@ -5,14 +5,14 @@ import { parseSshJournalEntry } from "../dist/ssh-events.js";
 test("parses successful SSH authentication into structured fields only", () => {
   const event = parseSshJournalEntry(
     JSON.stringify({
-      MESSAGE: "Accepted publickey for anthony from 192.0.2.10 port 54321 ssh2",
+      MESSAGE: "Accepted publickey for testuser from 192.0.2.10 port 54321 ssh2",
       __REALTIME_TIMESTAMP: "1760200000123456",
     }),
   );
 
   assert.deepEqual(event, {
     outcome: "success",
-    username: "anthony",
+    username: "testuser",
     sourceIp: "192.0.2.10",
     occurredAt: 1760200000123,
   });
@@ -37,7 +37,7 @@ test("parses failed SSH authentication and ignores unrelated log entries", () =>
   assert.equal(
     parseSshJournalEntry(
       JSON.stringify({
-        MESSAGE: "Connection closed by authenticating user anthony 192.0.2.10",
+        MESSAGE: "Connection closed by authenticating user testuser 192.0.2.10",
         __REALTIME_TIMESTAMP: "1760200000123456",
       }),
     ),
