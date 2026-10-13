@@ -1,8 +1,9 @@
 # XGS Monitoring Agent
 
-The lightweight agent reports heartbeats and structured SSH authentication
-events to the XGS monitoring service over outbound HTTPS. It runs as an
-unprivileged systemd service and does not execute commands remotely.
+The lightweight agent reports heartbeats, structured SSH authentication
+events, and versioned OS/hardware telemetry to the XGS monitoring service over
+outbound HTTPS. It runs as an unprivileged systemd service and does not execute
+commands remotely.
 
 ## Requirements
 
@@ -35,6 +36,19 @@ itself processes only SSH authentication entries. Approve this separately for
 each host. If enrollment succeeds, the installer removes the spent token from
 the protected environment file. If it times out, the token remains there so
 the agent can retry; inspect the service logs before requesting a new token.
+
+Telemetry includes CPU utilization/load, memory and swap, per-filesystem space
+and inode usage, uptime, OS/kernel version, CPU and block-device inventory,
+agent version, boot ID, Docker daemon state when installed, and optional
+systemd service states. Docker container details are not collected, and the
+agent is not granted Docker socket access. To monitor additional systemd
+services, add a comma-separated allowlist such as
+`XGS_MONITOR_SERVICES=nginx.service,pteroq.service` to
+`/etc/xgs-monitor-agent.env`, then restart the agent.
+
+The central service schedules OS, Hardware, and General history reports at
+15-minute, daily, and hourly intervals. Older agents continue heartbeat and
+SSH reporting, but do not provide telemetry until manually updated.
 
 ## Update
 

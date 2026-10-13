@@ -7,6 +7,7 @@ import {
   markAgentEnrolled,
   type AgentState,
 } from "./state.js";
+import { collectAgentMetrics } from "./metrics.js";
 import { parseSshJournalEntry } from "./ssh-events.js";
 
 const REQUEST_TIMEOUT_MS = 10_000;
@@ -188,6 +189,60 @@ async function sendSshEvent(
   }
 }
 
+async function sendMetrics(
+  state: AgentState,
+  config: ReturnType<typeof loadAgentConfig>,
+): Promise<number> {
+  const metrics = await collectAgentMetrics(config.serviceUnits);
+  const response = await fetch(
+    `${config.monitorBaseUrl}/api/v1/agents/metrics`,
+    {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${state.agentToken}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(metrics),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    },
+  );
+
+  if (!response.ok) {
+    throw new ReceiverResponseError(response.status);
+  }
+
+  return readHeartbeatInterval(await response.json());
+}
+
+async function runMetrics(
+  state: AgentState,
+  config: ReturnType<typeof loadAgentConfig>,
+  initialIntervalSeconds: number,
+): Promise<void> {
+  let intervalSeconds = initialIntervalSeconds;
+  let retryDelay = intervalSeconds * 1000;
+
+  while (!stopping) {
+    try {
+      intervalSeconds = await sendMetrics(state, config);
+      retryDelay = intervalSeconds * 1000;
+      await wait(retryDelay);
+    } catch (error) {
+      if (stopping) {
+        return;
+      }
+      if (isPermanentClientError(error)) {
+        console.error("Metrics upload rejected", describeError(error));
+        await wait(intervalSeconds * 1000);
+        continue;
+      }
+      console.error("Metrics upload failed; retrying", describeError(error));
+      await wait(retryDelay);
+      retryDelay = Math.min(retryDelay * 2, MAX_RETRY_DELAY_MS);
+    }
+  }
+}
+
 async function sendSshEventWithRetry(
   event: NonNullable<ReturnType<typeof parseSshJournalEntry>>,
   state: AgentState,
@@ -366,6 +421,7 @@ async function main(): Promise<void> {
   console.info("Agent heartbeat service started");
   await Promise.all([
     runHeartbeats(state, config, heartbeatIntervalSeconds),
+    runMetrics(state, config, heartbeatIntervalSeconds),
     runSshJournalReader(state, config),
   ]);
 }

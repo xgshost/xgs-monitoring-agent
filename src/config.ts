@@ -5,6 +5,7 @@ export interface AgentConfig {
   enrollmentToken?: string;
   stateFilePath: string;
   heartbeatIntervalSeconds: number;
+  serviceUnits: string[];
 }
 
 function requiredString(environment: NodeJS.ProcessEnv, name: string): string {
@@ -25,6 +26,28 @@ function positiveInteger(
     throw new Error(`${name} must be a positive integer`);
   }
   return value;
+}
+
+function optionalServiceUnits(environment: NodeJS.ProcessEnv): string[] {
+  const value = environment.XGS_MONITOR_SERVICES?.trim();
+  if (!value) {
+    return [];
+  }
+
+  const units = value.split(",").map((unit) => unit.trim());
+  if (
+    units.length > 19 ||
+    units.some(
+      (unit) =>
+        !/^[A-Za-z0-9_.@:-]{1,128}\.service$/.test(unit),
+    ) ||
+    new Set(units).size !== units.length
+  ) {
+    throw new Error(
+      "XGS_MONITOR_SERVICES must be a comma-separated list of up to 19 unique systemd service units",
+    );
+  }
+  return units;
 }
 
 export function loadAgentConfig(environment: NodeJS.ProcessEnv): AgentConfig {
@@ -64,5 +87,6 @@ export function loadAgentConfig(environment: NodeJS.ProcessEnv): AgentConfig {
       "XGS_MONITOR_HEARTBEAT_INTERVAL_SECONDS",
       60,
     ),
+    serviceUnits: optionalServiceUnits(environment),
   };
 }
