@@ -1,7 +1,12 @@
 import { spawn } from "node:child_process";
+import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { setTimeout as setTimer } from "node:timers";
 import { loadAgentConfig } from "./config.js";
+import {
+  reportAgentError,
+  type AgentErrorOperation,
+} from "./error-reporting.js";
 import {
   loadAgentState,
   markAgentEnrolled,
@@ -49,6 +54,23 @@ function readHeartbeatInterval(value: unknown): number {
 
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : "Unexpected receiver error";
+}
+
+async function recordError(
+  state: AgentState,
+  config: ReturnType<typeof loadAgentConfig>,
+  operation: AgentErrorOperation,
+  message: string,
+  error: unknown,
+): Promise<void> {
+  console.error(message, describeError(error));
+  await reportAgentError(
+    join(dirname(config.stateFilePath), "errors.jsonl"),
+    config.monitorBaseUrl,
+    state,
+    operation,
+    error,
+  );
 }
 
 let stopping = false;
@@ -129,16 +151,30 @@ async function redeemWithRetry(
       return await redeemEnrollment(initialState, config);
     } catch (error) {
       if (isPermanentClientError(error)) {
-        throw new Error(
+        const rejection = new Error(
           "Enrollment was rejected or expired. Clear the agent state file and request a fresh enrollment token.",
         );
+        await recordError(
+          initialState,
+          config,
+          "enrollment",
+          "Enrollment request rejected",
+          rejection,
+        );
+        throw rejection;
       }
 
       if (stopping) {
         return undefined;
       }
 
-      console.error("Enrollment request failed; retrying", describeError(error));
+      await recordError(
+        initialState,
+        config,
+        "enrollment",
+        "Enrollment request failed; retrying",
+        error,
+      );
       await wait(retryDelay);
       retryDelay = Math.min(retryDelay * 2, 60_000);
     }
@@ -256,11 +292,23 @@ async function runMetrics(
         return;
       }
       if (isPermanentClientError(error)) {
-        console.error("Metrics upload rejected", describeError(error));
+        await recordError(
+          state,
+          config,
+          "metrics_upload",
+          "Metrics upload rejected",
+          error,
+        );
         await wait(intervalSeconds * 1000);
         continue;
       }
-      console.error("Metrics upload failed; retrying", describeError(error));
+      await recordError(
+        state,
+        config,
+        "metrics_upload",
+        "Metrics upload failed; retrying",
+        error,
+      );
       await wait(retryDelay);
       retryDelay = Math.min(retryDelay * 2, MAX_RETRY_DELAY_MS);
     }
@@ -287,7 +335,13 @@ async function sendSshEventWithRetry(
         return;
       }
 
-      console.error("SSH event upload failed; retrying", describeError(error));
+      await recordError(
+        state,
+        config,
+        "ssh_event_upload",
+        "SSH event upload failed; retrying",
+        error,
+      );
       await wait(retryDelay);
       retryDelay = Math.min(retryDelay * 2, MAX_RETRY_DELAY_MS);
     }
@@ -314,9 +368,12 @@ async function sendSudoAuthFailureWithRetry(
         return;
       }
 
-      console.error(
+      await recordError(
+        state,
+        config,
+        "sudo_event_upload",
         "Sudo authentication event upload failed; retrying",
-        describeError(error),
+        error,
       );
       await wait(retryDelay);
       retryDelay = Math.min(retryDelay * 2, MAX_RETRY_DELAY_MS);
@@ -424,9 +481,12 @@ async function runAuthenticationJournalReader(
       if (stopping) {
         return;
       }
-      console.error(
+      await recordError(
+        state,
+        config,
+        "journal_reader",
         "Authentication journal reader stopped; retrying",
-        describeError(error),
+        error,
       );
       await wait(30_000);
     }
@@ -448,6 +508,13 @@ async function runHeartbeats(
       await wait(retryDelay);
     } catch (error) {
       if (isPermanentClientError(error)) {
+        await recordError(
+          state,
+          config,
+          "heartbeat_upload",
+          "Heartbeat upload rejected",
+          error,
+        );
         throw new Error(
           "Receiver rejected the agent credential. Clear the agent state file and enroll the server again.",
         );
@@ -457,7 +524,13 @@ async function runHeartbeats(
         return;
       }
 
-      console.error("Heartbeat failed; retrying", describeError(error));
+      await recordError(
+        state,
+        config,
+        "heartbeat_upload",
+        "Heartbeat failed; retrying",
+        error,
+      );
       await wait(retryDelay);
       retryDelay = Math.min(retryDelay * 2, MAX_RETRY_DELAY_MS);
     }
