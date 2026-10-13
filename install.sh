@@ -184,6 +184,7 @@ runuser -u nobody -- env HOME="$build_dir/home" \
 install -d -o root -g root -m 0755 "$SCRIPT_DIR/dist"
 cp -a "$build_dir/dist/." "$SCRIPT_DIR/dist/"
 chown -R root:root "$SCRIPT_DIR/dist"
+chmod -R u=rwX,go=rX "$SCRIPT_DIR/dist"
 cleanup_build
 build_dir=""
 

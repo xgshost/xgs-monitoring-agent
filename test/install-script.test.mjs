@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { accessSync, constants } from "node:fs";
+import { accessSync, constants, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
@@ -8,6 +8,11 @@ const installerPath = fileURLToPath(new URL("../install.sh", import.meta.url));
 
 test("installer is executable, syntactically valid, and documents its usage", () => {
   assert.doesNotThrow(() => accessSync(installerPath, constants.X_OK));
+  assert.ok(
+    readFileSync(installerPath, "utf8").includes(
+      'chmod -R u=rwX,go=rX "$SCRIPT_DIR/dist"',
+    ),
+  );
 
   const syntaxCheck = spawnSync("bash", ["-n", installerPath], {
     encoding: "utf8",
