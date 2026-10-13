@@ -52,16 +52,20 @@ SSH reporting, but do not provide telemetry until manually updated.
 
 ## Update
 
-Run updates manually as an administrator:
+The updater is manual; the agent never updates itself. For the first update on
+an existing installation, pull the updater and run it:
 
 ```sh
-cd /opt/xgs-monitoring-agent
-git pull --ff-only
-npm ci
-npm run build
-npm test
-npm prune --omit=dev
-sudo systemctl restart xgs-monitor-agent
+sudo bash -c 'git -C /opt/xgs-monitoring-agent pull --ff-only origin main && /opt/xgs-monitoring-agent/update.sh'
 ```
 
-The agent has no self-update, remote shell, or server-control feature.
+For later updates, run:
+
+```sh
+sudo /opt/xgs-monitoring-agent/update.sh
+```
+
+The updater refuses dirty or non-`main` checkouts, pulls only fast-forward
+changes, and builds/tests before restarting the service. It does not discard
+local changes or configure passwordless sudo. The agent has no remote shell or
+server-control feature.
