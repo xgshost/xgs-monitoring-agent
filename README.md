@@ -41,6 +41,12 @@ removes the spent token from the protected environment file. If it times out,
 the token remains there so the agent can retry; inspect the service logs before
 requesting a new token.
 
+Operational errors are written as structured JSON lines next to the agent state
+file and forwarded to the central receiver after enrollment. Reports contain
+only an operation name, a sanitized error code, and a timestamp—not raw error
+messages or credentials. The local file is capped at 1 MiB with one rotated
+copy; it remains available if the central server cannot be reached.
+
 Telemetry includes CPU utilization/load, memory and swap, per-filesystem space
 and inode usage, uptime, OS/kernel version, CPU and block-device inventory,
 agent version, boot ID, Docker daemon state when installed, and optional
