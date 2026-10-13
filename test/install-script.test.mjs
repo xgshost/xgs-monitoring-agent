@@ -13,6 +13,10 @@ test("installer is executable, syntactically valid, and documents its usage", ()
       'chmod -R u=rwX,go=rX "$SCRIPT_DIR/dist"',
     ),
   );
+  const installerSource = readFileSync(installerPath, "utf8");
+  assert.match(installerSource, /^  update\.sh \\$/m);
+  assert.match(installerSource, /^  auto-update\.sh \\$/m);
+  assert.match(installerSource, /^  deploy \\$/m);
 
   const syntaxCheck = spawnSync("bash", ["-n", installerPath], {
     encoding: "utf8",

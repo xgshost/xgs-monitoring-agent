@@ -173,7 +173,17 @@ command -v npm >/dev/null || fail "npm was not installed with Node.js"
 cd "$INSTALL_DIR"
 build_dir="$(mktemp -d "${TMPDIR:-/var/tmp}/xgs-monitor-agent-build.XXXXXX")"
 install -d -o nobody -g nogroup -m 0700 "$build_dir/home"
-cp -a install.sh package.json package-lock.json tsconfig.json src test "$build_dir/"
+cp -a \
+  install.sh \
+  update.sh \
+  auto-update.sh \
+  package.json \
+  package-lock.json \
+  tsconfig.json \
+  src \
+  test \
+  deploy \
+  "$build_dir/"
 chown -R nobody:nogroup "$build_dir"
 runuser -u nobody -- env HOME="$build_dir/home" \
   npm --prefix "$build_dir" ci --ignore-scripts
