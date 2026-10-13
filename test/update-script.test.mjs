@@ -15,7 +15,11 @@ test("updater is executable, syntactically valid, and checks before restarting",
   assert.equal(syntaxCheck.status, 0, syntaxCheck.stderr);
 
   const source = readFileSync(updaterPath, "utf8");
-  assert.match(source, /git -C "\$REPOSITORY_DIR" pull --ff-only origin main/);
+  assert.match(source, /--rebuild-current/);
+  assert.match(source, /git -C "\$REPOSITORY_DIR" fetch origin main/);
+  assert.match(source, /git -C "\$REPOSITORY_DIR" merge --ff-only/);
+  assert.match(source, /xgs-monitor-agent-successful-update/);
+  assert.match(source, /flock -n 9/);
   assert.ok(
     source.indexOf("npm test") <
       source.indexOf('systemctl restart "$SERVICE_NAME"'),

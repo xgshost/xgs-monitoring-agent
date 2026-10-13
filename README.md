@@ -56,7 +56,7 @@ The updater is manual; the agent never updates itself. For the first update on
 an existing installation, pull the updater and run it:
 
 ```sh
-sudo bash -c 'git -C /opt/xgs-monitoring-agent pull --ff-only origin main && /opt/xgs-monitoring-agent/update.sh'
+sudo bash -c 'git -C /opt/xgs-monitoring-agent pull --ff-only origin main && /opt/xgs-monitoring-agent/update.sh --rebuild-current'
 ```
 
 For later updates, run:
@@ -69,3 +69,29 @@ The updater refuses dirty or non-`main` checkouts, pulls only fast-forward
 changes, and builds/tests before restarting the service. It does not discard
 local changes or configure passwordless sudo. The agent has no remote shell or
 server-control feature.
+
+## Optional automatic updates
+
+Automatic updates are disabled by default. To opt in to a daily check with a
+random delay of up to 30 minutes:
+
+```sh
+sudo /opt/xgs-monitoring-agent/auto-update.sh enable
+```
+
+Enable the timer only after completing the first update above.
+
+Check or disable the timer with:
+
+```sh
+sudo /opt/xgs-monitoring-agent/auto-update.sh status
+sudo /opt/xgs-monitoring-agent/auto-update.sh disable
+```
+
+The timer uses the same fast-forward, build, and test checks as the manual
+updater. It skips commits that were already updated successfully and retries
+after a failed run, even if `main` has not advanced. It restarts the agent only
+after a successful build and test. The systemd updater runs as root to update
+the root-owned checkout and restart the service; this also means Git and npm
+scripts from `main` execute as root when an update is available. Enable it only
+if automatic deployment from that branch is acceptable.
