@@ -9,6 +9,7 @@ import {
 } from "./state.js";
 import { collectAgentMetrics } from "./metrics.js";
 import { parseSshJournalEntry } from "./ssh-events.js";
+import { parseSudoJournalEntry } from "./sudo-events.js";
 
 const REQUEST_TIMEOUT_MS = 10_000;
 const MAX_RETRY_DELAY_MS = 300_000;
@@ -189,6 +190,29 @@ async function sendSshEvent(
   }
 }
 
+async function sendSudoAuthFailureEvent(
+  event: NonNullable<ReturnType<typeof parseSudoJournalEntry>>,
+  state: AgentState,
+  config: ReturnType<typeof loadAgentConfig>,
+): Promise<void> {
+  const response = await fetch(
+    `${config.monitorBaseUrl}/api/v1/agents/sudo-events`,
+    {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${state.agentToken}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(event),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    },
+  );
+
+  if (!response.ok) {
+    throw new ReceiverResponseError(response.status);
+  }
+}
+
 async function sendMetrics(
   state: AgentState,
   config: ReturnType<typeof loadAgentConfig>,
@@ -270,7 +294,37 @@ async function sendSshEventWithRetry(
   }
 }
 
-async function followSshJournal(
+async function sendSudoAuthFailureWithRetry(
+  event: NonNullable<ReturnType<typeof parseSudoJournalEntry>>,
+  state: AgentState,
+  config: ReturnType<typeof loadAgentConfig>,
+): Promise<void> {
+  let retryDelay = 1_000;
+
+  while (!stopping) {
+    try {
+      await sendSudoAuthFailureEvent(event, state, config);
+      return;
+    } catch (error) {
+      if (isPermanentClientError(error)) {
+        throw error;
+      }
+
+      if (stopping) {
+        return;
+      }
+
+      console.error(
+        "Sudo authentication event upload failed; retrying",
+        describeError(error),
+      );
+      await wait(retryDelay);
+      retryDelay = Math.min(retryDelay * 2, MAX_RETRY_DELAY_MS);
+    }
+  }
+}
+
+async function followAuthenticationJournal(
   state: AgentState,
   config: ReturnType<typeof loadAgentConfig>,
 ): Promise<void> {
@@ -282,6 +336,7 @@ async function followSshJournal(
       "--output=json",
       "--no-pager",
       "--identifier=sshd",
+      "--identifier=sudo",
     ],
     { stdio: ["ignore", "pipe", "pipe"] },
   );
@@ -327,6 +382,10 @@ async function followSshJournal(
       if (event) {
         await sendSshEventWithRetry(event, state, config);
       }
+      const sudoEvent = parseSudoJournalEntry(line);
+      if (sudoEvent) {
+        await sendSudoAuthFailureWithRetry(sudoEvent, state, config);
+      }
     }
   } finally {
     lines.close();
@@ -354,18 +413,21 @@ async function followSshJournal(
   throw new Error(`journalctl exited with code ${exit.code ?? "unknown"}`);
 }
 
-async function runSshJournalReader(
+async function runAuthenticationJournalReader(
   state: AgentState,
   config: ReturnType<typeof loadAgentConfig>,
 ): Promise<void> {
   while (!stopping) {
     try {
-      await followSshJournal(state, config);
+      await followAuthenticationJournal(state, config);
     } catch (error) {
       if (stopping) {
         return;
       }
-      console.error("SSH journal reader stopped; retrying", describeError(error));
+      console.error(
+        "Authentication journal reader stopped; retrying",
+        describeError(error),
+      );
       await wait(30_000);
     }
   }
@@ -422,7 +484,7 @@ async function main(): Promise<void> {
   await Promise.all([
     runHeartbeats(state, config, heartbeatIntervalSeconds),
     runMetrics(state, config, heartbeatIntervalSeconds),
-    runSshJournalReader(state, config),
+    runAuthenticationJournalReader(state, config),
   ]);
 }
 
