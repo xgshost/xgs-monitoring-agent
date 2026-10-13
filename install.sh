@@ -103,7 +103,7 @@ printf '\n'
 getent group systemd-journal >/dev/null ||
   fail "The systemd-journal group is missing; verify journal access for this host"
 printf 'Adding the agent to systemd-journal grants it read access to all system journal entries.\n'
-printf 'The agent itself processes only SSH authentication entries.\n'
+printf 'The agent itself processes only SSH and sudo authentication entries.\n'
 confirm "Approve journal-read access for $SERVICE_USER on this host?" ||
   fail "Stopped without granting journal access"
 

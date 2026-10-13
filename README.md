@@ -1,15 +1,16 @@
 # XGS Monitoring Agent
 
-The lightweight agent reports heartbeats, structured SSH authentication
-events, and versioned OS/hardware telemetry to the XGS monitoring service over
-outbound HTTPS. It runs as an unprivileged systemd service and does not execute
-commands remotely.
+The lightweight agent reports heartbeats, structured SSH and sudo
+authentication events, and versioned OS/hardware telemetry to the XGS
+monitoring service over outbound HTTPS. It runs as an unprivileged systemd
+service and does not execute commands remotely.
 
 ## Requirements
 
 - Debian or Ubuntu with systemd and `journalctl`
 - Node.js 22 and npm
-- An administrator-approved way for the agent user to read SSH journal entries
+- An administrator-approved way for the agent user to read authentication
+  journal entries
 
 ## Install
 
@@ -32,10 +33,13 @@ prompts for the monitoring URL and one-use token without echoing the token.
 
 Before granting journal access, it explains that the
 `systemd-journal` group permits reading all system journal entries; the agent
-itself processes only SSH authentication entries. Approve this separately for
-each host. If enrollment succeeds, the installer removes the spent token from
-the protected environment file. If it times out, the token remains there so
-the agent can retry; inspect the service logs before requesting a new token.
+itself processes structured SSH authentication and sudo authentication-failure
+entries only. Sudo alerts use the invoking login name or UID and do not forward
+raw journal messages, commands, terminals, or working directories. Approve
+journal access separately for each host. If enrollment succeeds, the installer
+removes the spent token from the protected environment file. If it times out,
+the token remains there so the agent can retry; inspect the service logs before
+requesting a new token.
 
 Telemetry includes CPU utilization/load, memory and swap, per-filesystem space
 and inode usage, uptime, OS/kernel version, CPU and block-device inventory,
@@ -48,7 +52,8 @@ services, add a comma-separated allowlist such as
 
 The central service schedules OS, Hardware, and General history reports at
 15-minute, daily, and hourly intervals. Older agents continue heartbeat and
-SSH reporting, but do not provide telemetry until manually updated.
+SSH reporting, but do not report sudo failures or provide telemetry until
+manually updated.
 
 ## Update
 
