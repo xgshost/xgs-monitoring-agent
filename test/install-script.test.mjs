@@ -5,6 +5,9 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 const installerPath = fileURLToPath(new URL("../install.sh", import.meta.url));
+const firewallInstallerPath = fileURLToPath(
+  new URL("../install-firewall-sync.sh", import.meta.url),
+);
 
 test("installer is executable, syntactically valid, and documents its usage", () => {
   assert.doesNotThrow(() => accessSync(installerPath, constants.X_OK));
@@ -20,6 +23,22 @@ test("installer is executable, syntactically valid, and documents its usage", ()
 
   const syntaxCheck = spawnSync("bash", ["-n", installerPath], {
     encoding: "utf8",
+  });
+
+  test("firewall sync installer is executable, valid, and requires explicit consent", () => {
+    assert.doesNotThrow(() =>
+      accessSync(firewallInstallerPath, constants.X_OK),
+    );
+    const syntaxCheck = spawnSync("bash", ["-n", firewallInstallerPath], {
+      encoding: "utf8",
+    });
+    assert.equal(syntaxCheck.status, 0, syntaxCheck.stderr);
+    const help = spawnSync(firewallInstallerPath, ["--help"], {
+      encoding: "utf8",
+    });
+    assert.equal(help.status, 0, help.stderr);
+    assert.match(help.stdout, /sudo \.\/install-firewall-sync\.sh/);
+    assert.match(help.stdout, /Autobans remain disabled centrally/);
   });
   assert.equal(syntaxCheck.status, 0, syntaxCheck.stderr);
 

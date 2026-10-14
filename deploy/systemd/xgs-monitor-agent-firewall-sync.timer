@@ -1,0 +1,12 @@
+[Unit]
+Description=Poll XGS SSH autoban policy once per minute
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+AccuracySec=10s
+RandomizedDelaySec=15s
+Unit=xgs-monitor-agent-firewall-sync.service
+
+[Install]
+WantedBy=timers.target
