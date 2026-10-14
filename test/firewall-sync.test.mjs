@@ -36,7 +36,16 @@ test("classifies nft failures without exposing stderr contents", () => {
         stderr: "unclassified nft error",
       }),
     ),
-    "NFT_EXIT_2",
+    "NFT_EXIT_2_STDERR",
+  );
+  assert.equal(
+    firewallSyncErrorCode(
+      Object.assign(new Error("command failed"), {
+        status: 1,
+        stdout: "Operation not supported",
+      }),
+    ),
+    "NFT_FEATURE_UNSUPPORTED",
   );
 });
 

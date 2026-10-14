@@ -251,6 +251,24 @@ export function firewallSyncErrorCode(error: unknown): string {
   ) {
     return error.code;
   }
+  const output = (key: "stdout" | "stderr"): string => {
+    if (typeof error !== "object" || error === null) {
+      return "";
+    }
+    let value: unknown;
+    if (key === "stderr" && "stderr" in error) {
+      value = error.stderr;
+    } else if (key === "stdout" && "stdout" in error) {
+      value = error.stdout;
+    } else {
+      return "";
+    }
+    return typeof value === "string"
+      ? value
+      : Buffer.isBuffer(value)
+        ? value.toString("utf8")
+        : "";
+  };
   if (
     typeof error === "object" &&
     error !== null &&
@@ -259,22 +277,38 @@ export function firewallSyncErrorCode(error: unknown): string {
     Number.isSafeInteger(error.status) &&
     error.status >= 0
   ) {
-    const stderr =
-      "stderr" in error && typeof error.stderr === "string"
-        ? error.stderr
-        : "stderr" in error && Buffer.isBuffer(error.stderr)
-          ? error.stderr.toString("utf8")
-          : "";
-    if (/operation not permitted|permission denied/i.test(stderr)) {
+    const stderr = output("stderr");
+    const stdout = output("stdout");
+    const diagnostic = `${stderr}\n${stdout}`;
+    if (/operation not permitted|permission denied/i.test(diagnostic)) {
       return "NFT_PERMISSION_DENIED";
     }
-    if (/syntax error|unexpected token/i.test(stderr)) {
+    if (
+      /operation not supported|protocol not supported|function not implemented/i.test(
+        diagnostic,
+      )
+    ) {
+      return "NFT_FEATURE_UNSUPPORTED";
+    }
+    if (
+      /no such file or directory|no such object|does not exist/i.test(diagnostic)
+    ) {
+      return "NFT_OBJECT_MISSING";
+    }
+    if (/invalid argument/i.test(diagnostic)) {
+      return "NFT_INVALID_ARGUMENT";
+    }
+    if (/syntax error|unexpected token/i.test(diagnostic)) {
       return "NFT_SYNTAX_ERROR";
     }
-    if (/file exists|already exists/i.test(stderr)) {
+    if (/file exists|already exists/i.test(diagnostic)) {
       return "NFT_STATE_CONFLICT";
     }
-    return `NFT_EXIT_${error.status}`;
+    if (/could not process|netlink/i.test(diagnostic)) {
+      return "NFT_NETLINK_ERROR";
+    }
+    const outputStream = stderr ? "STDERR" : stdout ? "STDOUT" : "NO_OUTPUT";
+    return `NFT_EXIT_${error.status}_${outputStream}`;
   }
   return error instanceof Error ? error.name : "UNKNOWN";
 }
