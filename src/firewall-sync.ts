@@ -122,6 +122,7 @@ function buildNftablesTableContents(
   policy: SshBanPolicy,
   ports: number[],
   now: number,
+  tableExists: boolean,
 ): string[] {
   if (
     !Number.isSafeInteger(now) ||
@@ -156,14 +157,22 @@ function buildNftablesTableContents(
   }
 
   const portSet = `{ ${[...ports].sort((a, b) => a - b).join(", ")} }`;
-  const lines = [
-    `add table inet ${TABLE_NAME}`,
-    `add set inet ${TABLE_NAME} blocked_ipv4 { type ipv4_addr; flags timeout; }`,
-    `add set inet ${TABLE_NAME} blocked_ipv6 { type ipv6_addr; flags timeout; }`,
-    `add chain inet ${TABLE_NAME} ssh_input { type filter hook input priority -10; policy accept; }`,
+  const lines = tableExists
+    ? [
+        `flush table inet ${TABLE_NAME}`,
+        `flush set inet ${TABLE_NAME} blocked_ipv4`,
+        `flush set inet ${TABLE_NAME} blocked_ipv6`,
+      ]
+    : [
+        `add table inet ${TABLE_NAME}`,
+        `add set inet ${TABLE_NAME} blocked_ipv4 { type ipv4_addr; flags timeout; }`,
+        `add set inet ${TABLE_NAME} blocked_ipv6 { type ipv6_addr; flags timeout; }`,
+        `add chain inet ${TABLE_NAME} ssh_input { type filter hook input priority -10; policy accept; }`,
+      ];
+  lines.push(
     `add rule inet ${TABLE_NAME} ssh_input tcp dport ${portSet} ip saddr @blocked_ipv4 drop`,
     `add rule inet ${TABLE_NAME} ssh_input tcp dport ${portSet} ip6 saddr @blocked_ipv6 drop`,
-  ];
+  );
   for (const [address, seconds] of ipv4) {
     lines.push(
       `add element inet ${TABLE_NAME} blocked_ipv4 { ${address} timeout ${seconds}s }`,
@@ -183,10 +192,7 @@ export function buildNftablesSyncScript(
   now: number,
   tableExists = true,
 ): string {
-  const lines = [
-    ...(tableExists ? [`delete table inet ${TABLE_NAME}`] : []),
-    ...buildNftablesTableContents(policy, ports, now),
-  ];
+  const lines = buildNftablesTableContents(policy, ports, now, tableExists);
   return `${lines.join("\n")}\n`;
 }
 
