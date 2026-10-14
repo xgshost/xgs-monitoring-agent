@@ -8,6 +8,12 @@ const installerPath = fileURLToPath(new URL("../install.sh", import.meta.url));
 const firewallInstallerPath = fileURLToPath(
   new URL("../install-firewall-sync.sh", import.meta.url),
 );
+const firewallServicePath = fileURLToPath(
+  new URL(
+    "../deploy/systemd/xgs-monitor-agent-firewall-sync.service",
+    import.meta.url,
+  ),
+);
 
 test("installer is executable, syntactically valid, and documents its usage", () => {
   assert.doesNotThrow(() => accessSync(installerPath, constants.X_OK));
@@ -48,4 +54,13 @@ test("installer is executable, syntactically valid, and documents its usage", ()
   assert.equal(help.status, 0, help.stderr);
   assert.match(help.stdout, /sudo \.\/install\.sh/);
   assert.match(help.stdout, /one-use enrollment token/);
+});
+
+test("firewall sync service is unprivileged except for nftables administration", () => {
+  const service = readFileSync(firewallServicePath, "utf8");
+  assert.match(service, /^User=xgs-monitor-agent$/m);
+  assert.match(service, /^Group=xgs-monitor-agent$/m);
+  assert.match(service, /^StateDirectory=xgs-monitor-agent$/m);
+  assert.match(service, /^CapabilityBoundingSet=CAP_NET_ADMIN$/m);
+  assert.match(service, /^AmbientCapabilities=CAP_NET_ADMIN$/m);
 });
