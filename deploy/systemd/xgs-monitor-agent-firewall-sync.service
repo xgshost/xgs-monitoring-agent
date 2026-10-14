@@ -5,8 +5,10 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-User=root
-Group=root
+User=xgs-monitor-agent
+Group=xgs-monitor-agent
+StateDirectory=xgs-monitor-agent
+StateDirectoryMode=0700
 EnvironmentFile=/etc/xgs-monitor-agent.env
 ExecStart=/usr/bin/node /opt/xgs-monitoring-agent/dist/firewall-sync.js
 NoNewPrivileges=true
