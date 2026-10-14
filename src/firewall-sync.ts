@@ -328,16 +328,7 @@ if (
   import.meta.url === pathToFileURL(process.argv[1]).href
 ) {
   run().catch((error: unknown) => {
-    const code =
-      typeof error === "object" &&
-      error !== null &&
-      "code" in error &&
-      typeof error.code === "string"
-        ? error.code
-        : error instanceof Error
-          ? error.name
-          : "UNKNOWN";
-    console.error("SSH firewall policy sync failed", code);
+    console.error("SSH firewall policy sync failed", errorCode(error));
     process.exitCode = 1;
   });
 }
