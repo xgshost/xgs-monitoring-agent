@@ -41,6 +41,10 @@ test("ban installer migrates to Fail2ban/UFW with explicit confirmation", () => 
     source,
     /apt-get install -y --no-install-recommends fail2ban/,
   );
+  assert.match(
+    source,
+    /ExecStartPost=\/usr\/bin\/chmod 0660 \/run\/fail2ban\/fail2ban\.sock/,
+  );
   assert.match(source, /ufw app info "\$UFW_PROFILE"/);
   assert.match(source, /systemctl start "\$SERVICE_NAME"/);
   assert.match(source, /nft delete table inet xgs_monitor_agent/);
