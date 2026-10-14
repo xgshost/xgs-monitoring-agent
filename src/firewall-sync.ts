@@ -4,9 +4,10 @@ import { pathToFileURL } from "node:url";
 import { loadAgentConfig } from "./config.js";
 import { loadAgentState } from "./state.js";
 
-const TABLE_NAME = "xgs_monitor_agent";
+const FAIL2BAN_JAIL = "xgs-monitor-agent";
 const REQUEST_TIMEOUT_MS = 10_000;
 const MAX_BAN_TTL_MS = 86_520_000;
+const MAX_BANS_PER_BATCH = 100;
 
 export interface SshBanPolicy {
   enabled: boolean;
@@ -14,7 +15,7 @@ export interface SshBanPolicy {
   bans: Array<{ sourceIp: string; expiresAtMs: number }>;
 }
 
-type NftRunner = (args: string[], input?: string) => string;
+type Fail2banRunner = (args: string[]) => string;
 
 function canonicalIpAddress(value: string): string {
   const version = isIP(value);
@@ -110,20 +111,37 @@ export function parseSshPorts(value: string | undefined): number[] {
   return ports.sort((left, right) => left - right);
 }
 
-function nftRunner(args: string[], input?: string): string {
-  return execFileSync("nft", args, {
+function fail2banRunner(args: string[]): string {
+  return execFileSync("fail2ban-client", args, {
     encoding: "utf8",
-    input,
-    stdio: ["pipe", "pipe", "pipe"],
+    stdio: ["ignore", "pipe", "pipe"],
+    maxBuffer: 1024 * 1024,
   });
 }
 
-function buildNftablesTableContents(
+export function parseFail2banBanList(output: string): string[] {
+  const trimmed = output.trim();
+  if (!trimmed) {
+    return [];
+  }
+  const addresses = trimmed.split(/[\s,]+/).map(canonicalIpAddress);
+  return [...new Set(addresses)].sort();
+}
+
+function batches<T>(items: T[], size: number): T[][] {
+  const result: T[][] = [];
+  for (let offset = 0; offset < items.length; offset += size) {
+    result.push(items.slice(offset, offset + size));
+  }
+  return result;
+}
+
+export function syncFail2banPolicy(
   policy: SshBanPolicy,
   ports: number[],
   now: number,
-  tableExists: boolean,
-): string[] {
+  runFail2ban: Fail2banRunner = fail2banRunner,
+): number {
   if (
     !Number.isSafeInteger(now) ||
     now < 1 ||
@@ -134,11 +152,10 @@ function buildNftablesTableContents(
     ) ||
     new Set(ports).size !== ports.length
   ) {
-    throw new TypeError("Invalid nftables sync inputs");
+    throw new TypeError("Invalid Fail2ban sync inputs");
   }
 
-  const ipv4 = new Map<string, number>();
-  const ipv6 = new Map<string, number>();
+  const desired = new Set<string>();
   if (policy.enabled) {
     for (const ban of policy.bans) {
       if (ban.expiresAtMs <= now) {
@@ -148,76 +165,25 @@ function buildNftablesTableContents(
       if (ban.expiresAtMs > now + MAX_BAN_TTL_MS) {
         throw new TypeError("Policy ban exceeds the maximum allowed duration");
       }
-      const seconds = Math.max(
-        1,
-        Math.ceil((ban.expiresAtMs - now) / 1000),
-      );
-      (isIP(sourceIp) === 4 ? ipv4 : ipv6).set(sourceIp, seconds);
+      desired.add(sourceIp);
     }
   }
 
-  const portSet = `{ ${[...ports].sort((a, b) => a - b).join(", ")} }`;
-  const lines = tableExists
-    ? [
-        `flush set inet ${TABLE_NAME} blocked_ipv4`,
-        `flush set inet ${TABLE_NAME} blocked_ipv6`,
-      ]
-    : [
-        `add table inet ${TABLE_NAME}`,
-        `add set inet ${TABLE_NAME} blocked_ipv4 { type ipv4_addr; flags timeout; }`,
-        `add set inet ${TABLE_NAME} blocked_ipv6 { type ipv6_addr; flags timeout; }`,
-        `add chain inet ${TABLE_NAME} ssh_input { type filter hook input priority -10; policy accept; }`,
-      ];
-  if (!tableExists) {
-    lines.push(
-      `add rule inet ${TABLE_NAME} ssh_input tcp dport ${portSet} ip saddr @blocked_ipv4 drop`,
-      `add rule inet ${TABLE_NAME} ssh_input tcp dport ${portSet} ip6 saddr @blocked_ipv6 drop`,
-    );
-  }
-  for (const [address, seconds] of ipv4) {
-    lines.push(
-      `add element inet ${TABLE_NAME} blocked_ipv4 { ${address} timeout ${seconds}s }`,
-    );
-  }
-  for (const [address, seconds] of ipv6) {
-    lines.push(
-      `add element inet ${TABLE_NAME} blocked_ipv6 { ${address} timeout ${seconds}s }`,
-    );
-  }
-  return lines;
-}
-
-export function buildNftablesSyncScript(
-  policy: SshBanPolicy,
-  ports: number[],
-  now: number,
-  tableExists = true,
-): string {
-  const lines = buildNftablesTableContents(policy, ports, now, tableExists);
-  return `${lines.join("\n")}\n`;
-}
-
-export function syncNftablesPolicy(
-  policy: SshBanPolicy,
-  ports: number[],
-  now: number,
-  runNft: NftRunner = nftRunner,
-): number {
-  const activeBanCount = policy.enabled
-    ? policy.bans.filter((ban) => ban.expiresAtMs > now).length
-    : 0;
-  const tables = runNft(["list", "tables"]);
-  const tableExists = tables
-    .split("\n")
-    .some((line) => line.trim() === `table inet ${TABLE_NAME}`);
-  if (!tableExists && activeBanCount === 0) {
-    return 0;
-  }
-  runNft(
-    ["-f", "-"],
-    buildNftablesSyncScript(policy, ports, now, tableExists),
+  const current = new Set(
+    parseFail2banBanList(
+      runFail2ban(["get", FAIL2BAN_JAIL, "banip", ","]),
+    ),
   );
-  return activeBanCount;
+  const toUnban = [...current].filter((address) => !desired.has(address));
+  const toBan = [...desired].filter((address) => !current.has(address));
+
+  for (const chunk of batches(toUnban, MAX_BANS_PER_BATCH)) {
+    runFail2ban(["set", FAIL2BAN_JAIL, "unbanip", ...chunk]);
+  }
+  for (const chunk of batches(toBan, MAX_BANS_PER_BATCH)) {
+    runFail2ban(["set", FAIL2BAN_JAIL, "banip", ...chunk]);
+  }
+  return desired.size;
 }
 
 async function fetchSshBanPolicy(
@@ -285,38 +251,23 @@ export function firewallSyncErrorCode(error: unknown): string {
     Number.isSafeInteger(error.status) &&
     error.status >= 0
   ) {
-    const stderr = output("stderr");
-    const stdout = output("stdout");
-    const diagnostic = `${stderr}\n${stdout}`;
+    const diagnostic = `${output("stderr")}\n${output("stdout")}`;
     if (/operation not permitted|permission denied/i.test(diagnostic)) {
-      return "NFT_PERMISSION_DENIED";
+      return "FAIL2BAN_PERMISSION_DENIED";
+    }
+    if (/no such jail|jail .* not found|unknown jail/i.test(diagnostic)) {
+      return "FAIL2BAN_JAIL_MISSING";
     }
     if (
-      /operation not supported|protocol not supported|function not implemented/i.test(
+      /failed to communicate|connection refused|no such file or directory/i.test(
         diagnostic,
       )
     ) {
-      return "NFT_FEATURE_UNSUPPORTED";
+      return "FAIL2BAN_UNAVAILABLE";
     }
-    if (
-      /no such file or directory|no such object|does not exist/i.test(diagnostic)
-    ) {
-      return "NFT_OBJECT_MISSING";
-    }
-    if (/invalid argument/i.test(diagnostic)) {
-      return "NFT_INVALID_ARGUMENT";
-    }
-    if (/syntax error|unexpected token/i.test(diagnostic)) {
-      return "NFT_SYNTAX_ERROR";
-    }
-    if (/file exists|already exists/i.test(diagnostic)) {
-      return "NFT_STATE_CONFLICT";
-    }
-    if (/could not process|netlink/i.test(diagnostic)) {
-      return "NFT_NETLINK_ERROR";
-    }
-    const outputStream = stderr ? "STDERR" : stdout ? "STDOUT" : "NO_OUTPUT";
-    return `NFT_EXIT_${error.status}_${outputStream}`;
+    const hasOutput =
+      Boolean(output("stderr")) || Boolean(output("stdout"));
+    return `FAIL2BAN_EXIT_${error.status}_${hasOutput ? "OUTPUT" : "NO_OUTPUT"}`;
   }
   return error instanceof Error ? error.name : "UNKNOWN";
 }
@@ -363,7 +314,7 @@ async function run(): Promise<void> {
   let count: number;
   try {
     const ports = parseSshPorts(process.env.XGS_MONITOR_SSH_PORTS);
-    count = syncNftablesPolicy(policy, ports, Date.now());
+    count = syncFail2banPolicy(policy, ports, Date.now());
   } catch (error) {
     try {
       await reportPolicyStatus(config.monitorBaseUrl, state.agentToken, {
@@ -374,7 +325,7 @@ async function run(): Promise<void> {
       });
     } catch (reportError) {
       console.error(
-        "Could not report SSH firewall sync failure",
+        "Could not report SSH ban sync failure",
         firewallSyncErrorCode(reportError),
       );
     }
@@ -396,7 +347,7 @@ if (
 ) {
   run().catch((error: unknown) => {
     console.error(
-      "SSH firewall policy sync failed",
+      "SSH ban policy sync failed",
       firewallSyncErrorCode(error),
     );
     process.exitCode = 1;

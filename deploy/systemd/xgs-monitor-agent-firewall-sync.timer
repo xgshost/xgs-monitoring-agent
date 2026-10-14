@@ -1,5 +1,6 @@
+# Managed by XGS Monitoring Agent.
 [Unit]
-Description=Poll XGS SSH autoban policy once per minute
+Description=Poll central SSH autoban policy for Fail2ban once per minute
 
 [Timer]
 OnBootSec=2min

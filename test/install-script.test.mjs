@@ -5,24 +5,20 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 const installerPath = fileURLToPath(new URL("../install.sh", import.meta.url));
-const firewallInstallerPath = fileURLToPath(
-  new URL("../install-firewall-sync.sh", import.meta.url),
+const banInstallerPath = fileURLToPath(
+  new URL("../install-ban-sync.sh", import.meta.url),
 );
-const firewallServicePath = fileURLToPath(
+const banServicePath = fileURLToPath(
   new URL(
     "../deploy/systemd/xgs-monitor-agent-firewall-sync.service",
     import.meta.url,
   ),
 );
 
-test("installer is executable, syntactically valid, and documents its usage", () => {
+test("agent installer is executable, syntactically valid, and documents usage", () => {
   assert.doesNotThrow(() => accessSync(installerPath, constants.X_OK));
-  assert.ok(
-    readFileSync(installerPath, "utf8").includes(
-      'chmod -R u=rwX,go=rX "$SCRIPT_DIR/dist"',
-    ),
-  );
   const installerSource = readFileSync(installerPath, "utf8");
+  assert.match(installerSource, /chmod -R u=rwX,go=rX "\$SCRIPT_DIR\/dist"/);
   assert.match(installerSource, /^  update\.sh \\$/m);
   assert.match(installerSource, /^  auto-update\.sh \\$/m);
   assert.match(installerSource, /^  deploy \\$/m);
@@ -30,46 +26,48 @@ test("installer is executable, syntactically valid, and documents its usage", ()
   const syntaxCheck = spawnSync("bash", ["-n", installerPath], {
     encoding: "utf8",
   });
-
-  test("firewall sync installer is executable, valid, and requires explicit consent", () => {
-    assert.doesNotThrow(() =>
-      accessSync(firewallInstallerPath, constants.X_OK),
-    );
-    const firewallInstallerSource = readFileSync(firewallInstallerPath, "utf8");
-    assert.match(
-      firewallInstallerSource,
-      /apt-get install -y --no-install-recommends nftables/,
-    );
-    assert.doesNotMatch(
-      firewallInstallerSource,
-      /systemctl (?:enable|start) nftables\.service/,
-    );
-    const syntaxCheck = spawnSync("bash", ["-n", firewallInstallerPath], {
-      encoding: "utf8",
-    });
-    assert.equal(syntaxCheck.status, 0, syntaxCheck.stderr);
-    const help = spawnSync(firewallInstallerPath, ["--help"], {
-      encoding: "utf8",
-    });
-    assert.equal(help.status, 0, help.stderr);
-    assert.match(help.stdout, /sudo \.\/install-firewall-sync\.sh/);
-    assert.match(help.stdout, /Autobans remain disabled centrally/);
-  });
   assert.equal(syntaxCheck.status, 0, syntaxCheck.stderr);
 
-  const help = spawnSync(installerPath, ["--help"], {
-    encoding: "utf8",
-  });
+  const help = spawnSync(installerPath, ["--help"], { encoding: "utf8" });
   assert.equal(help.status, 0, help.stderr);
   assert.match(help.stdout, /sudo \.\/install\.sh/);
   assert.match(help.stdout, /one-use enrollment token/);
 });
 
-test("firewall sync service is unprivileged except for nftables administration", () => {
-  const service = readFileSync(firewallServicePath, "utf8");
+test("ban installer migrates to Fail2ban/UFW with explicit confirmation", () => {
+  assert.doesNotThrow(() => accessSync(banInstallerPath, constants.X_OK));
+  const source = readFileSync(banInstallerPath, "utf8");
+  assert.match(
+    source,
+    /apt-get install -y --no-install-recommends fail2ban/,
+  );
+  assert.match(source, /ufw app info "\$UFW_PROFILE"/);
+  assert.match(source, /systemctl start "\$SERVICE_NAME"/);
+  assert.match(source, /nft delete table inet xgs_monitor_agent/);
+  assert.ok(
+    source.indexOf('systemctl start "$SERVICE_NAME"') <
+      source.indexOf("nft delete table inet xgs_monitor_agent"),
+  );
+  assert.doesNotMatch(source, /systemctl (?:enable|start) ufw\.service/);
+  assert.doesNotMatch(source, /apt-get install[^'\n]*nftables/);
+
+  const syntaxCheck = spawnSync("bash", ["-n", banInstallerPath], {
+    encoding: "utf8",
+  });
+  assert.equal(syntaxCheck.status, 0, syntaxCheck.stderr);
+
+  const help = spawnSync(banInstallerPath, ["--help"], { encoding: "utf8" });
+  assert.equal(help.status, 0, help.stderr);
+  assert.match(help.stdout, /sudo \.\/install-ban-sync\.sh/);
+  assert.match(help.stdout, /Central Discord autoban thresholds and allowlists remain unchanged/);
+});
+
+test("ban sync runs unprivileged and uses the Fail2ban control group", () => {
+  const service = readFileSync(banServicePath, "utf8");
   assert.match(service, /^User=xgs-monitor-agent$/m);
   assert.match(service, /^Group=xgs-monitor-agent$/m);
+  assert.match(service, /^SupplementaryGroups=xgs-monitor-agent-fail2ban$/m);
   assert.match(service, /^StateDirectory=xgs-monitor-agent$/m);
-  assert.match(service, /^CapabilityBoundingSet=CAP_NET_ADMIN$/m);
-  assert.match(service, /^AmbientCapabilities=CAP_NET_ADMIN$/m);
+  assert.doesNotMatch(service, /^AmbientCapabilities=/m);
+  assert.doesNotMatch(service, /^CapabilityBoundingSet=CAP_NET_ADMIN$/m);
 });

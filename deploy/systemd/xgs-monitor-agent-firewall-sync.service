@@ -1,5 +1,6 @@
+# Managed by XGS Monitoring Agent.
 [Unit]
-Description=Synchronize XGS SSH autobans to nftables
+Description=Synchronize XGS SSH autobans through Fail2ban and UFW
 After=network-online.target
 Wants=network-online.target
 
@@ -7,6 +8,7 @@ Wants=network-online.target
 Type=oneshot
 User=xgs-monitor-agent
 Group=xgs-monitor-agent
+SupplementaryGroups=xgs-monitor-agent-fail2ban
 StateDirectory=xgs-monitor-agent
 StateDirectoryMode=0700
 EnvironmentFile=/etc/xgs-monitor-agent.env
@@ -19,9 +21,8 @@ ProtectKernelTunables=true
 ProtectControlGroups=true
 LockPersonality=true
 RestrictSUIDSGID=true
-CapabilityBoundingSet=CAP_NET_ADMIN
-AmbientCapabilities=CAP_NET_ADMIN
-RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 
 [Install]
 WantedBy=multi-user.target

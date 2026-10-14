@@ -63,18 +63,29 @@ manually updated.
 
 ## Optional SSH autoban enforcement
 
-After the agent is installed, built, and enrolled, install the firewall policy
-synchronizer on each host:
+After the agent is installed, built, and enrolled, install the Fail2ban/UFW
+policy synchronizer on each host:
 
 ```sh
-sudo ./install-firewall-sync.sh
+sudo ./install-ban-sync.sh
 ```
 
-The installer offers to install the `nftables` package through APT on Debian
-and Ubuntu when the `nft` command is missing. It does not enable
-`nftables.service` or change UFW. The synchronizer runs as the agent account
-with `CAP_NET_ADMIN` and updates only its dedicated SSH table. Autobans remain
-disabled centrally until an administrator enables them with `/ssh-guard enable`.
+The installer offers to install Fail2ban through APT on Debian and Ubuntu when
+it is missing. It requires UFW to already be active, creates a dedicated UFW
+application profile for the configured SSH ports, and uses Fail2ban's UFW
+action to enforce centrally managed bans. It does not enable UFW or change its
+default policy. The existing global threshold, escalation, Discord controls,
+and allowlist remain in the central service.
+
+The central policy synchronizer runs as `xgs-monitor-agent` without
+`CAP_NET_ADMIN`. A dedicated group grants it access to Fail2ban's local control
+socket; Fail2ban performs UFW changes. Each Fail2ban ban is capped at 24 hours,
+the central policy's maximum duration. Central expiry, manual unban, and
+allowlisting are reconciled by the once-per-minute timer.
+
+During migration, the installer removes only the legacy
+`inet xgs_monitor_agent` nftables table, and only after a successful Fail2ban
+policy sync. Existing UFW rules and defaults are not reset.
 
 ## Update
 
