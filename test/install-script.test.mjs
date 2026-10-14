@@ -43,7 +43,7 @@ test("ban installer migrates to Fail2ban/UFW with explicit confirmation", () => 
   );
   assert.match(
     source,
-    /ExecStartPost=\/usr\/bin\/chmod 0660 \/run\/fail2ban\/fail2ban\.sock/,
+    /ExecStartPost=\/bin\/sh -c .*while \[ ! -S \/run\/fail2ban\/fail2ban\.sock \].*chmod 0660 \/run\/fail2ban\/fail2ban\.sock/,
   );
   assert.match(source, /ufw app info "\$UFW_PROFILE"/);
   assert.match(source, /systemctl start "\$SERVICE_NAME"/);

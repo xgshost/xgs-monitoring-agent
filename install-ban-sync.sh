@@ -162,7 +162,7 @@ cat >"$FAIL2BAN_DROPIN" <<EOF
 [Service]
 Group=$FAIL2BAN_GROUP
 UMask=0117
-ExecStartPost=/usr/bin/chmod 0660 /run/fail2ban/fail2ban.sock
+ExecStartPost=/bin/sh -c 'i=0; while [ ! -S /run/fail2ban/fail2ban.sock ] && [ "$i" -lt 100 ]; do i=$((i + 1)); sleep 0.1; done; [ -S /run/fail2ban/fail2ban.sock ] && exec /usr/bin/chmod 0660 /run/fail2ban/fail2ban.sock'
 EOF
 chmod 0644 "$FAIL2BAN_DROPIN"
 chown root:root "$FAIL2BAN_DROPIN"
