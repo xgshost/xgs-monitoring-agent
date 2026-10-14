@@ -232,7 +232,7 @@ async function fetchSshBanPolicy(
   return validateSshBanPolicy(body);
 }
 
-function errorCode(error: unknown): string {
+export function firewallSyncErrorCode(error: unknown): string {
   if (
     typeof error === "object" &&
     error !== null &&
@@ -250,6 +250,31 @@ function errorCode(error: unknown): string {
     /^[A-Za-z0-9_.-]{1,64}$/.test(error.code)
   ) {
     return error.code;
+  }
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "status" in error &&
+    typeof error.status === "number" &&
+    Number.isSafeInteger(error.status) &&
+    error.status >= 0
+  ) {
+    const stderr =
+      "stderr" in error && typeof error.stderr === "string"
+        ? error.stderr
+        : "stderr" in error && Buffer.isBuffer(error.stderr)
+          ? error.stderr.toString("utf8")
+          : "";
+    if (/operation not permitted|permission denied/i.test(stderr)) {
+      return "NFT_PERMISSION_DENIED";
+    }
+    if (/syntax error|unexpected token/i.test(stderr)) {
+      return "NFT_SYNTAX_ERROR";
+    }
+    if (/file exists|already exists/i.test(stderr)) {
+      return "NFT_STATE_CONFLICT";
+    }
+    return `NFT_EXIT_${error.status}`;
   }
   return error instanceof Error ? error.name : "UNKNOWN";
 }
@@ -303,12 +328,12 @@ async function run(): Promise<void> {
         policyRevision: policy.revision,
         status: "failed",
         activeBanCount: 0,
-        errorCode: errorCode(error),
+        errorCode: firewallSyncErrorCode(error),
       });
     } catch (reportError) {
       console.error(
         "Could not report SSH firewall sync failure",
-        errorCode(reportError),
+        firewallSyncErrorCode(reportError),
       );
     }
     throw error;
@@ -328,7 +353,10 @@ if (
   import.meta.url === pathToFileURL(process.argv[1]).href
 ) {
   run().catch((error: unknown) => {
-    console.error("SSH firewall policy sync failed", errorCode(error));
+    console.error(
+      "SSH firewall policy sync failed",
+      firewallSyncErrorCode(error),
+    );
     process.exitCode = 1;
   });
 }

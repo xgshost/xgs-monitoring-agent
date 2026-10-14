@@ -2,12 +2,43 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildNftablesSyncScript,
+  firewallSyncErrorCode,
   parseSshPorts,
   syncNftablesPolicy,
   validateSshBanPolicy,
 } from "../dist/firewall-sync.js";
 
 const now = 1_800_000_000_000;
+
+test("classifies nft failures without exposing stderr contents", () => {
+  assert.equal(
+    firewallSyncErrorCode(
+      Object.assign(new Error("command failed"), {
+        status: 1,
+        stderr: "Operation not permitted for 203.0.113.7",
+      }),
+    ),
+    "NFT_PERMISSION_DENIED",
+  );
+  assert.equal(
+    firewallSyncErrorCode(
+      Object.assign(new Error("command failed"), {
+        status: 1,
+        stderr: "syntax error, unexpected token",
+      }),
+    ),
+    "NFT_SYNTAX_ERROR",
+  );
+  assert.equal(
+    firewallSyncErrorCode(
+      Object.assign(new Error("command failed"), {
+        status: 2,
+        stderr: "unclassified nft error",
+      }),
+    ),
+    "NFT_EXIT_2",
+  );
+});
 
 test("validates policy entries and rejects invalid or duplicate addresses", () => {
   assert.deepEqual(
