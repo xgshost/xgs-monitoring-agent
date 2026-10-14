@@ -61,6 +61,21 @@ The central service schedules OS, Hardware, and General history reports at
 SSH reporting, but do not report sudo failures or provide telemetry until
 manually updated.
 
+## Optional SSH autoban enforcement
+
+After the agent is installed, built, and enrolled, install the firewall policy
+synchronizer on each host:
+
+```sh
+sudo ./install-firewall-sync.sh
+```
+
+The installer offers to install the `nftables` package through APT on Debian
+and Ubuntu when the `nft` command is missing. It does not enable
+`nftables.service` or change UFW. The synchronizer runs as the agent account
+with `CAP_NET_ADMIN` and updates only its dedicated SSH table. Autobans remain
+disabled centrally until an administrator enables them with `/ssh-guard enable`.
+
 ## Update
 
 The updater is manual; the agent never updates itself. For the first update on

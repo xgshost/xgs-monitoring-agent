@@ -118,24 +118,11 @@ function nftRunner(args: string[], input?: string): string {
   });
 }
 
-function initialTableScript(ports: number[]): string {
-  const portSet = `{ ${ports.join(", ")} }`;
-  return [
-    `add table inet ${TABLE_NAME}`,
-    `add set inet ${TABLE_NAME} blocked_ipv4 { type ipv4_addr; flags timeout; }`,
-    `add set inet ${TABLE_NAME} blocked_ipv6 { type ipv6_addr; flags timeout; }`,
-    `add chain inet ${TABLE_NAME} ssh_input { type filter hook input priority -10; policy accept; }`,
-    `add rule inet ${TABLE_NAME} ssh_input tcp dport ${portSet} ip saddr @blocked_ipv4 drop`,
-    `add rule inet ${TABLE_NAME} ssh_input tcp dport ${portSet} ip6 saddr @blocked_ipv6 drop`,
-    "",
-  ].join("\n");
-}
-
-export function buildNftablesSyncScript(
+function buildNftablesTableContents(
   policy: SshBanPolicy,
   ports: number[],
   now: number,
-): string {
+): string[] {
   if (
     !Number.isSafeInteger(now) ||
     now < 1 ||
@@ -170,9 +157,10 @@ export function buildNftablesSyncScript(
 
   const portSet = `{ ${[...ports].sort((a, b) => a - b).join(", ")} }`;
   const lines = [
-    `flush set inet ${TABLE_NAME} blocked_ipv4`,
-    `flush set inet ${TABLE_NAME} blocked_ipv6`,
-    `flush chain inet ${TABLE_NAME} ssh_input`,
+    `add table inet ${TABLE_NAME}`,
+    `add set inet ${TABLE_NAME} blocked_ipv4 { type ipv4_addr; flags timeout; }`,
+    `add set inet ${TABLE_NAME} blocked_ipv6 { type ipv6_addr; flags timeout; }`,
+    `add chain inet ${TABLE_NAME} ssh_input { type filter hook input priority -10; policy accept; }`,
     `add rule inet ${TABLE_NAME} ssh_input tcp dport ${portSet} ip saddr @blocked_ipv4 drop`,
     `add rule inet ${TABLE_NAME} ssh_input tcp dport ${portSet} ip6 saddr @blocked_ipv6 drop`,
   ];
@@ -186,6 +174,19 @@ export function buildNftablesSyncScript(
       `add element inet ${TABLE_NAME} blocked_ipv6 { ${address} timeout ${seconds}s }`,
     );
   }
+  return lines;
+}
+
+export function buildNftablesSyncScript(
+  policy: SshBanPolicy,
+  ports: number[],
+  now: number,
+  tableExists = true,
+): string {
+  const lines = [
+    ...(tableExists ? [`delete table inet ${TABLE_NAME}`] : []),
+    ...buildNftablesTableContents(policy, ports, now),
+  ];
   return `${lines.join("\n")}\n`;
 }
 
@@ -205,10 +206,10 @@ export function syncNftablesPolicy(
   if (!tableExists && activeBanCount === 0) {
     return 0;
   }
-  if (!tableExists) {
-    runNft(["-f", "-"], initialTableScript(ports));
-  }
-  runNft(["-f", "-"], buildNftablesSyncScript(policy, ports, now));
+  runNft(
+    ["-f", "-"],
+    buildNftablesSyncScript(policy, ports, now, tableExists),
+  );
   return activeBanCount;
 }
 

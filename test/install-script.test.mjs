@@ -35,6 +35,15 @@ test("installer is executable, syntactically valid, and documents its usage", ()
     assert.doesNotThrow(() =>
       accessSync(firewallInstallerPath, constants.X_OK),
     );
+    const firewallInstallerSource = readFileSync(firewallInstallerPath, "utf8");
+    assert.match(
+      firewallInstallerSource,
+      /apt-get install -y --no-install-recommends nftables/,
+    );
+    assert.doesNotMatch(
+      firewallInstallerSource,
+      /systemctl (?:enable|start) nftables\.service/,
+    );
     const syntaxCheck = spawnSync("bash", ["-n", firewallInstallerPath], {
       encoding: "utf8",
     });

@@ -136,7 +136,8 @@ test("builds timed IPv4 and IPv6 set updates only for SSH ports", () => {
     [22, 2222],
     now,
   );
-  assert.match(script, /flush set inet xgs_monitor_agent blocked_ipv4/);
+  assert.match(script, /^delete table inet xgs_monitor_agent$/m);
+  assert.match(script, /add table inet xgs_monitor_agent/);
   assert.match(script, /tcp dport \{ 22, 2222 \} ip saddr @blocked_ipv4 drop/);
   assert.match(script, /192\.0\.2\.10 timeout 90s/);
   assert.match(script, /2001:db8::1 timeout 120s/);
@@ -161,8 +162,54 @@ test("disabling policy clears the dedicated table without adding bans", () => {
   );
   assert.equal(count, 0);
   assert.equal(calls.length, 2);
-  assert.match(calls[1].input, /flush set inet xgs_monitor_agent blocked_ipv4/);
+  assert.match(calls[1].input, /^delete table inet xgs_monitor_agent/m);
+  assert.match(calls[1].input, /add table inet xgs_monitor_agent/);
   assert.doesNotMatch(calls[1].input, /add element/);
+});
+
+test("creates the table and first active ban in one nft transaction", () => {
+  const calls = [];
+  const count = syncNftablesPolicy(
+    {
+      enabled: true,
+      revision: 3,
+      bans: [{ sourceIp: "192.0.2.10", expiresAtMs: now + 60_000 }],
+    },
+    [22],
+    now,
+    (args, input) => {
+      calls.push({ args, input });
+      return "";
+    },
+  );
+  assert.equal(count, 1);
+  assert.equal(calls.length, 2);
+  assert.match(calls[1].input, /^add table inet xgs_monitor_agent/m);
+  assert.match(calls[1].input, /192\.0\.2\.10 timeout 60s/);
+  assert.doesNotMatch(calls[1].input, /^delete table/m);
+  assert.doesNotMatch(calls[1].input, /^flush /m);
+});
+
+test("atomically replaces the existing table with the current policy", () => {
+  const calls = [];
+  const count = syncNftablesPolicy(
+    {
+      enabled: true,
+      revision: 4,
+      bans: [{ sourceIp: "192.0.2.10", expiresAtMs: now + 60_000 }],
+    },
+    [22],
+    now,
+    (args, input) => {
+      calls.push({ args, input });
+      return calls.length === 1 ? "table inet xgs_monitor_agent" : "";
+    },
+  );
+  assert.equal(count, 1);
+  assert.equal(calls.length, 2);
+  assert.match(calls[1].input, /^delete table inet xgs_monitor_agent/m);
+  assert.match(calls[1].input, /192\.0\.2\.10 timeout 60s/);
+  assert.doesNotMatch(calls[1].input, /^flush /m);
 });
 
 test("does not touch nftables when there is no table and no active ban", () => {
