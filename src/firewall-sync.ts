@@ -159,7 +159,6 @@ function buildNftablesTableContents(
   const portSet = `{ ${[...ports].sort((a, b) => a - b).join(", ")} }`;
   const lines = tableExists
     ? [
-        `flush table inet ${TABLE_NAME}`,
         `flush set inet ${TABLE_NAME} blocked_ipv4`,
         `flush set inet ${TABLE_NAME} blocked_ipv6`,
       ]
@@ -169,10 +168,12 @@ function buildNftablesTableContents(
         `add set inet ${TABLE_NAME} blocked_ipv6 { type ipv6_addr; flags timeout; }`,
         `add chain inet ${TABLE_NAME} ssh_input { type filter hook input priority -10; policy accept; }`,
       ];
-  lines.push(
-    `add rule inet ${TABLE_NAME} ssh_input tcp dport ${portSet} ip saddr @blocked_ipv4 drop`,
-    `add rule inet ${TABLE_NAME} ssh_input tcp dport ${portSet} ip6 saddr @blocked_ipv6 drop`,
-  );
+  if (!tableExists) {
+    lines.push(
+      `add rule inet ${TABLE_NAME} ssh_input tcp dport ${portSet} ip saddr @blocked_ipv4 drop`,
+      `add rule inet ${TABLE_NAME} ssh_input tcp dport ${portSet} ip6 saddr @blocked_ipv6 drop`,
+    );
+  }
   for (const [address, seconds] of ipv4) {
     lines.push(
       `add element inet ${TABLE_NAME} blocked_ipv4 { ${address} timeout ${seconds}s }`,
