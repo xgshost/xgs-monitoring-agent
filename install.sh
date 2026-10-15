@@ -30,10 +30,38 @@ Install the XGS Monitoring Agent on Debian or Ubuntu.
 
 Run from /opt/xgs-monitoring-agent:
   sudo ./install.sh
+  sudo ./install.sh --enable-docker-watch
 
 The installer requires an interactive terminal to collect the service URL,
 one-use enrollment token, and explicit journal-read permission consent.
+The Docker-watch option requires an existing installation and restarts its
+agent service after granting Docker-group access.
 HELP
+  exit 0
+fi
+
+if [[ "${1:-}" == "--enable-docker-watch" ]]; then
+  [[ "$#" -eq 1 ]] || fail "Usage: sudo ./install.sh --enable-docker-watch"
+  [[ "$EUID" -eq 0 ]] || fail "Run with sudo: sudo ./install.sh --enable-docker-watch"
+  command -v systemctl >/dev/null || fail "systemd is required"
+  command -v usermod >/dev/null || fail "usermod is required"
+  command -v docker >/dev/null || fail "Docker CLI is required for Docker monitoring"
+  getent passwd "$SERVICE_USER" >/dev/null ||
+    fail "The $SERVICE_USER account is not installed"
+  getent group docker >/dev/null ||
+    fail "The docker group is missing; install Docker before enabling Docker monitoring"
+  unit_load_state="$(systemctl show --property=LoadState --value xgs-monitor-agent.service)"
+  [[ "$unit_load_state" != "not-found" ]] ||
+    fail "The xgs-monitor-agent systemd unit is not installed"
+
+  printf 'Docker-group membership grants root-equivalent access to this host.\n'
+  confirm "Grant Docker socket access to $SERVICE_USER and restart its service?" ||
+    fail "Stopped without changing Docker access"
+  usermod --append --groups docker "$SERVICE_USER"
+  systemctl restart xgs-monitor-agent.service
+  systemctl is-active --quiet xgs-monitor-agent.service ||
+    fail "Docker access was granted but the agent service is not active"
+  printf 'Docker access enabled for %s; its service is active.\n' "$SERVICE_USER"
   exit 0
 fi
 
@@ -53,6 +81,7 @@ fi
 command -v systemctl >/dev/null || fail "systemd is required"
 command -v apt-get >/dev/null || fail "APT is required"
 command -v runuser >/dev/null || fail "runuser is required"
+command -v usermod >/dev/null || fail "usermod is required"
 getent passwd nobody >/dev/null || fail "The unprivileged nobody account is required"
 getent group nogroup >/dev/null || fail "The unprivileged nogroup is required"
 unit_load_state="$(systemctl show --property=LoadState --value xgs-monitor-agent.service)"
@@ -106,6 +135,16 @@ printf 'Adding the agent to systemd-journal grants it read access to all system 
 printf 'The agent itself processes only SSH and sudo authentication entries.\n'
 confirm "Approve journal-read access for $SERVICE_USER on this host?" ||
   fail "Stopped without granting journal access"
+
+docker_group_available=false
+if command -v docker >/dev/null 2>&1 && getent group docker >/dev/null; then
+  printf 'Docker-group membership grants root-equivalent access to this host.\n'
+  if confirm "Grant Docker socket access to $SERVICE_USER for container monitoring?"; then
+    docker_group_available=true
+  fi
+else
+  printf 'Docker CLI or docker group not found; Docker socket access will remain disabled.\n'
+fi
 
 temp_dir="$(mktemp -d "${TMPDIR:-/tmp}/xgs-monitor-agent-install.XXXXXX")"
 build_dir=""
@@ -202,6 +241,9 @@ getent passwd "$SERVICE_USER" >/dev/null &&
   fail "The $SERVICE_USER account appeared during installation"
 useradd --system --user-group --no-create-home --home-dir /nonexistent \
   --shell /usr/sbin/nologin "$SERVICE_USER"
+if [[ "$docker_group_available" == true ]]; then
+  usermod --append --groups docker "$SERVICE_USER"
+fi
 install -d -o root -g root -m 0755 "$UNIT_DROPIN_DIR"
 cat >"$UNIT_DROPIN_DIR/journal-access.conf" <<'UNIT'
 [Service]

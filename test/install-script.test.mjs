@@ -22,6 +22,11 @@ test("agent installer is executable, syntactically valid, and documents usage", 
   assert.match(installerSource, /^  update\.sh \\$/m);
   assert.match(installerSource, /^  auto-update\.sh \\$/m);
   assert.match(installerSource, /^  deploy \\$/m);
+  assert.match(installerSource, /^  sudo \.\/install\.sh --enable-docker-watch$/m);
+  assert.match(
+    installerSource,
+    /usermod --append --groups docker "\$SERVICE_USER"/,
+  );
 
   const syntaxCheck = spawnSync("bash", ["-n", installerPath], {
     encoding: "utf8",
@@ -31,6 +36,7 @@ test("agent installer is executable, syntactically valid, and documents usage", 
   const help = spawnSync(installerPath, ["--help"], { encoding: "utf8" });
   assert.equal(help.status, 0, help.stderr);
   assert.match(help.stdout, /sudo \.\/install\.sh/);
+  assert.match(help.stdout, /--enable-docker-watch/);
   assert.match(help.stdout, /one-use enrollment token/);
 });
 

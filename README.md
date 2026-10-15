@@ -30,7 +30,9 @@ remotely.
 The installer verifies Debian/Ubuntu, installs Node.js 22 through the signed
 NodeSource APT repository when needed, builds and tests the agent, creates its
 non-root service account, installs the systemd unit, and starts the service. It
-prompts for the monitoring URL and one-use token without echoing the token.
+prompts for the monitoring URL and one-use token without echoing the token. On
+hosts with the Docker CLI and `docker` group, it also asks whether to grant the
+agent Docker access; this is root-equivalent access to that host.
 
 Before granting journal access, it explains that the
 `systemd-journal` group permits reading all system journal entries; the agent
@@ -55,11 +57,11 @@ systemd service states. Container monitoring is controlled centrally with
 `/docker-watch`; the agent queries only centrally allowlisted names and reads
 container state, configured health-check status, and restart counts. It does
 not collect container logs or environment variables. Docker socket access is
-not granted by the installer. An administrator must explicitly add the agent
-account to the Docker group on each monitored host that needs this feature.
-Docker group membership is effectively root-equivalent on that host; do not
-grant it on servers that do not require container monitoring. Docker access
-failures are reported as unavailable telemetry, not as missing containers.
+granted only after explicit approval. For an already-installed agent, update
+the repository first, then run `sudo ./install.sh --enable-docker-watch` from
+`/opt/xgs-monitoring-agent`; this adds the agent to the Docker group and
+restarts its service. Docker access failures are reported as unavailable
+telemetry, not as missing containers.
 To monitor additional systemd services, add a comma-separated allowlist such as
 `XGS_MONITOR_SERVICES=nginx.service,pteroq.service` to
 `/etc/xgs-monitor-agent.env`, then restart the agent.
