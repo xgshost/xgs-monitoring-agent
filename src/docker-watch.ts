@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 
 const INSPECT_CONCURRENCY = 10;
+const MAX_DISCOVERED_CONTAINERS = 1_000;
 const INSPECT_FORMAT =
   "{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}|{{.RestartCount}}";
 export type DockerContainerHealth =
@@ -24,10 +25,111 @@ export interface DockerInspectResult {
   errorCode?: string;
 }
 
+export interface DockerContainerInventoryResult {
+  status: number | null;
+  stdout: string;
+  stderr: string;
+  errorCode?: string;
+}
+
 export class DockerWatchCollectionError extends Error {
   constructor(readonly errorCode: string) {
     super(errorCode);
     this.name = "DockerWatchCollectionError";
+  }
+}
+
+export function parseDockerContainerListResult(
+  result: DockerContainerInventoryResult,
+): string[] {
+  if (result.errorCode) {
+    const errorCode =
+      result.errorCode === "ENOENT"
+        ? "docker_cli_unavailable"
+        : result.errorCode === "ETIMEDOUT"
+          ? "docker_command_timeout"
+          : "docker_command_failed";
+    throw new DockerWatchCollectionError(errorCode);
+  }
+  if (result.status !== 0) {
+    throw new DockerWatchCollectionError("docker_daemon_unavailable");
+  }
+
+  const output = result.stdout.trim();
+  if (!output) {
+    return [];
+  }
+  const names = output.split(/\r?\n/);
+  if (names.length > MAX_DISCOVERED_CONTAINERS) {
+    throw new DockerWatchCollectionError("docker_inventory_too_large");
+  }
+  const uniqueNames = new Set<string>();
+  for (const name of names) {
+    if (
+      !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(name) ||
+      uniqueNames.has(name)
+    ) {
+      throw new DockerWatchCollectionError(
+        "docker_inventory_invalid_response",
+      );
+    }
+    uniqueNames.add(name);
+  }
+  return names;
+}
+
+function runDockerContainerList(): Promise<DockerContainerInventoryResult> {
+  return new Promise((resolve) => {
+    execFile(
+      "docker",
+      ["container", "ls", "--all", "--format", "{{.Names}}"],
+      {
+        encoding: "utf8",
+        timeout: 5_000,
+        maxBuffer: 256 * 1024,
+        windowsHide: true,
+      },
+      (error, stdout, stderr) => {
+        const errorCode =
+          error && typeof error.code === "string" ? error.code : undefined;
+        const status =
+          error && typeof error.code === "number"
+            ? error.code
+            : error
+              ? null
+              : 0;
+        resolve({
+          status,
+          stdout,
+          stderr,
+          ...(errorCode ? { errorCode } : {}),
+        });
+      },
+    );
+  });
+}
+
+export async function collectDockerContainerNames(
+  list: () => Promise<DockerContainerInventoryResult> =
+    runDockerContainerList,
+): Promise<
+  | { available: true; containerNames: string[] }
+  | { available: false; errorCode: string; containerNames: [] }
+> {
+  try {
+    return {
+      available: true,
+      containerNames: parseDockerContainerListResult(await list()),
+    };
+  } catch (error) {
+    if (error instanceof DockerWatchCollectionError) {
+      return {
+        available: false,
+        errorCode: error.errorCode,
+        containerNames: [],
+      };
+    }
+    throw error;
   }
 }
 

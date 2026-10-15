@@ -15,6 +15,7 @@ import {
 import { collectAgentMetrics } from "./metrics.js";
 import {
   collectDockerContainerSnapshots,
+  collectDockerContainerNames,
   type DockerContainerSnapshot,
 } from "./docker-watch.js";
 import { parseSshJournalEntry } from "./ssh-events.js";
@@ -419,6 +420,28 @@ async function sendDockerWatchReport(
   }
 }
 
+async function sendDockerContainerInventory(
+  state: AgentState,
+  config: ReturnType<typeof loadAgentConfig>,
+  inventory: Awaited<ReturnType<typeof collectDockerContainerNames>>,
+): Promise<void> {
+  const response = await fetch(
+    `${config.monitorBaseUrl}/api/v1/agents/docker-container-inventory`,
+    {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${state.agentToken}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(inventory),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    },
+  );
+  if (!response.ok) {
+    throw new ReceiverResponseError(response.status);
+  }
+}
+
 async function runDockerWatch(
   state: AgentState,
   config: ReturnType<typeof loadAgentConfig>,
@@ -432,6 +455,8 @@ async function runDockerWatch(
       const names = await fetchDockerWatchPolicy(state, config);
       const report = await collectDockerContainerSnapshots(names);
       await sendDockerWatchReport(state, config, report);
+      const inventory = await collectDockerContainerNames();
+      await sendDockerContainerInventory(state, config, inventory);
       retryDelay = intervalSeconds * 1000;
       await wait(retryDelay);
     } catch (error) {

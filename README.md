@@ -3,8 +3,10 @@
 The lightweight agent reports heartbeats, structured SSH and sudo
 authentication events, versioned OS/hardware telemetry, and centrally
 allowlisted Docker container state to the XGS monitoring service over outbound
-HTTPS. It runs as an unprivileged systemd service and does not execute commands
-remotely.
+HTTPS. It reports Docker container names only to support admin command
+autocomplete; state inspection remains limited to centrally allowlisted names.
+It does not send container logs or environment variables. It runs as an
+unprivileged systemd service and does not execute commands remotely.
 
 ## Requirements
 
@@ -56,7 +58,8 @@ agent version, boot ID, Docker daemon state when installed, and optional
 systemd service states. Container monitoring is controlled centrally with
 `/docker-watch`; the agent queries only centrally allowlisted names and reads
 container state, configured health-check status, and restart counts. It does
-not collect container logs or environment variables. Docker socket access is
+not collect container logs or environment variables. A separate name-only
+inventory is sent to support container autocomplete. Docker socket access is
 granted only after explicit approval. For an already-installed agent, update
 the repository first, then run `sudo ./install.sh --enable-docker-watch` from
 `/opt/xgs-monitoring-agent`; this adds the agent to the Docker group and

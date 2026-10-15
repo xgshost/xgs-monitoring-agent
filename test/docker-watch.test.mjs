@@ -1,10 +1,53 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  collectDockerContainerNames,
   collectDockerContainerSnapshots,
   DockerWatchCollectionError,
+  parseDockerContainerListResult,
   parseDockerInspectResult,
 } from "../dist/docker-watch.js";
+
+test("parses name-only Docker inventory, including stopped containers", () => {
+  assert.deepEqual(
+    parseDockerContainerListResult({
+      status: 0,
+      stdout: "web\nworker\n",
+      stderr: "",
+    }),
+    ["web", "worker"],
+  );
+  assert.deepEqual(
+    parseDockerContainerListResult({ status: 0, stdout: "", stderr: "" }),
+    [],
+  );
+});
+
+test("rejects invalid Docker inventory and reports Docker access failures", async () => {
+  assert.throws(
+    () =>
+      parseDockerContainerListResult({
+        status: 0,
+        stdout: "web\nbad/name\n",
+        stderr: "",
+      }),
+    (error) =>
+      error instanceof DockerWatchCollectionError &&
+      error.errorCode === "docker_inventory_invalid_response",
+  );
+  assert.deepEqual(
+    await collectDockerContainerNames(async () => ({
+      status: 1,
+      stdout: "",
+      stderr: "Docker daemon unavailable",
+    })),
+    {
+      available: false,
+      errorCode: "docker_daemon_unavailable",
+      containerNames: [],
+    },
+  );
+});
 
 test("parses running Docker containers without health checks", () => {
   assert.deepEqual(
