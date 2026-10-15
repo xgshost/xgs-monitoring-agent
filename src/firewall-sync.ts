@@ -6,7 +6,7 @@ import { loadAgentState } from "./state.js";
 
 const FAIL2BAN_JAIL = "xgs-monitor-agent";
 const REQUEST_TIMEOUT_MS = 10_000;
-const MAX_BAN_TTL_MS = 86_520_000;
+const MAX_BAN_TTL_MS = 30 * 86_400_000 + 60_000;
 const MAX_BANS_PER_BATCH = 100;
 
 export interface SshBanPolicy {

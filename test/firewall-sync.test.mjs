@@ -104,11 +104,23 @@ test("validates policy entries and rejects invalid or duplicate addresses", () =
           status: "ok",
           enabled: true,
           revision: 4,
-          bans: [{ sourceIp: "192.0.2.10", expiresAtMs: now + 2 * 86_400_000 }],
+          bans: [{ sourceIp: "192.0.2.10", expiresAtMs: now + 31 * 86_400_000 }],
         },
         now,
       ),
     /invalid SSH ban/,
+  );
+  assert.deepEqual(
+    validateSshBanPolicy(
+      {
+        status: "ok",
+        enabled: true,
+        revision: 4,
+        bans: [{ sourceIp: "192.0.2.10", expiresAtMs: now + 30 * 86_400_000 }],
+      },
+      now,
+    ).bans,
+    [{ sourceIp: "192.0.2.10", expiresAtMs: now + 30 * 86_400_000 }],
   );
 });
 

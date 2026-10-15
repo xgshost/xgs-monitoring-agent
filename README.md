@@ -80,9 +80,12 @@ and allowlist remain in the central service.
 The central policy synchronizer runs as `xgs-monitor-agent` without
 `CAP_NET_ADMIN`. A dedicated group grants it access to Fail2ban's local control
 socket; a Fail2ban systemd drop-in applies group access to the socket after
-startup. Fail2ban performs UFW changes. Each Fail2ban ban is capped at 24
-hours, the central policy's maximum duration. Central expiry, manual unban,
-and allowlisting are reconciled by the once-per-minute timer.
+startup. Fail2ban performs UFW changes. A local Fail2ban ban lasts at most 24
+hours; the once-per-minute synchronizer reapplies it while the central policy
+remains active, allowing central bans of up to 30 days. If central policy
+sync is unavailable for longer than the local Fail2ban ban lifetime, the
+local ban can expire until synchronization recovers. Central expiry, manual
+unban, and allowlisting are reconciled by the timer.
 
 During migration, the installer removes only the legacy
 `inet xgs_monitor_agent` nftables table, and only after a successful Fail2ban
