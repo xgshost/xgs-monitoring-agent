@@ -1,9 +1,10 @@
 # XGS Monitoring Agent
 
 The lightweight agent reports heartbeats, structured SSH and sudo
-authentication events, and versioned OS/hardware telemetry to the XGS
-monitoring service over outbound HTTPS. It runs as an unprivileged systemd
-service and does not execute commands remotely.
+authentication events, versioned OS/hardware telemetry, and centrally
+allowlisted Docker container state to the XGS monitoring service over outbound
+HTTPS. It runs as an unprivileged systemd service and does not execute commands
+remotely.
 
 ## Requirements
 
@@ -50,9 +51,16 @@ copy; it remains available if the central server cannot be reached.
 Telemetry includes CPU utilization/load, memory and swap, per-filesystem space
 and inode usage, uptime, OS/kernel version, CPU and block-device inventory,
 agent version, boot ID, Docker daemon state when installed, and optional
-systemd service states. Docker container details are not collected, and the
-agent is not granted Docker socket access. To monitor additional systemd
-services, add a comma-separated allowlist such as
+systemd service states. Container monitoring is controlled centrally with
+`/docker-watch`; the agent queries only centrally allowlisted names and reads
+container state, configured health-check status, and restart counts. It does
+not collect container logs or environment variables. Docker socket access is
+not granted by the installer. An administrator must explicitly add the agent
+account to the Docker group on each monitored host that needs this feature.
+Docker group membership is effectively root-equivalent on that host; do not
+grant it on servers that do not require container monitoring. Docker access
+failures are reported as unavailable telemetry, not as missing containers.
+To monitor additional systemd services, add a comma-separated allowlist such as
 `XGS_MONITOR_SERVICES=nginx.service,pteroq.service` to
 `/etc/xgs-monitor-agent.env`, then restart the agent.
 

@@ -17,6 +17,7 @@ export const AGENT_ERROR_OPERATIONS = [
   "ssh_event_upload",
   "sudo_event_upload",
   "journal_reader",
+  "docker_watch_upload",
   "agent_startup",
 ] as const;
 

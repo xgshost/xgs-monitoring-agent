@@ -13,11 +13,16 @@ import {
   type AgentState,
 } from "./state.js";
 import { collectAgentMetrics } from "./metrics.js";
+import {
+  collectDockerContainerSnapshots,
+  type DockerContainerSnapshot,
+} from "./docker-watch.js";
 import { parseSshJournalEntry } from "./ssh-events.js";
 import { parseSudoJournalEntry } from "./sudo-events.js";
 
 const REQUEST_TIMEOUT_MS = 10_000;
 const MAX_RETRY_DELAY_MS = 300_000;
+const DOCKER_WATCH_PAGE_SIZE = 100;
 
 class ReceiverResponseError extends Error {
   constructor(readonly statusCode: number) {
@@ -272,6 +277,178 @@ async function sendMetrics(
   }
 
   return readHeartbeatInterval(await response.json());
+}
+
+interface DockerWatchPolicyPage {
+  restartThreshold: number;
+  windowMinutes: number;
+  containers: string[];
+  nextOffset: number | null;
+}
+
+async function fetchDockerWatchPolicyPage(
+  state: AgentState,
+  config: ReturnType<typeof loadAgentConfig>,
+  offset: number,
+): Promise<DockerWatchPolicyPage> {
+  const response = await fetch(
+    `${config.monitorBaseUrl}/api/v1/agents/docker-watch-policy?offset=${offset}`,
+    {
+      headers: { authorization: `Bearer ${state.agentToken}` },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    },
+  );
+  if (!response.ok) {
+    throw new ReceiverResponseError(response.status);
+  }
+  const body: unknown = await response.json();
+  if (
+    !isObject(body) ||
+    body.status !== "ok" ||
+    typeof body.restartThreshold !== "number" ||
+    !Number.isSafeInteger(body.restartThreshold) ||
+    body.restartThreshold < 2 ||
+    body.restartThreshold > 100 ||
+    typeof body.windowMinutes !== "number" ||
+    !Number.isSafeInteger(body.windowMinutes) ||
+    body.windowMinutes < 1 ||
+    body.windowMinutes > 60 ||
+    !Array.isArray(body.containers) ||
+    body.containers.length > DOCKER_WATCH_PAGE_SIZE ||
+    (body.nextOffset !== null &&
+      (typeof body.nextOffset !== "number" ||
+        !Number.isSafeInteger(body.nextOffset) ||
+        body.nextOffset <= offset))
+  ) {
+    throw new Error("Receiver returned an invalid Docker watch policy");
+  }
+  const containers: string[] = [];
+  for (const name of body.containers) {
+    if (
+      typeof name !== "string" ||
+      !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(name)
+    ) {
+      throw new Error("Receiver returned an invalid Docker watch container");
+    }
+    containers.push(name);
+  }
+  return {
+    restartThreshold: body.restartThreshold,
+    windowMinutes: body.windowMinutes,
+    containers,
+    nextOffset: body.nextOffset as number | null,
+  };
+}
+
+async function fetchDockerWatchPolicy(
+  state: AgentState,
+  config: ReturnType<typeof loadAgentConfig>,
+): Promise<string[]> {
+  let offset = 0;
+  let restartThreshold: number | undefined;
+  let windowMinutes: number | undefined;
+  const containers: string[] = [];
+  const seen = new Set<string>();
+  do {
+    const page = await fetchDockerWatchPolicyPage(state, config, offset);
+    if (
+      (restartThreshold !== undefined &&
+        restartThreshold !== page.restartThreshold) ||
+      (windowMinutes !== undefined && windowMinutes !== page.windowMinutes)
+    ) {
+      throw new Error("Docker watch policy changed while loading pages");
+    }
+    restartThreshold = page.restartThreshold;
+    windowMinutes = page.windowMinutes;
+    for (const name of page.containers) {
+      if (seen.has(name)) {
+        throw new Error("Receiver returned duplicate Docker watch containers");
+      }
+      seen.add(name);
+      containers.push(name);
+    }
+    if (page.nextOffset === null) {
+      break;
+    }
+    offset = page.nextOffset;
+  } while (!stopping);
+  return containers;
+}
+
+async function sendDockerWatchReport(
+  state: AgentState,
+  config: ReturnType<typeof loadAgentConfig>,
+  report:
+    | { available: true; containers: DockerContainerSnapshot[] }
+    | { available: false; errorCode: string; containers: [] },
+): Promise<void> {
+  const groups =
+    report.containers.length === 0
+      ? [[]]
+      : Array.from(
+          { length: Math.ceil(report.containers.length / DOCKER_WATCH_PAGE_SIZE) },
+          (_, index) =>
+            report.containers.slice(
+              index * DOCKER_WATCH_PAGE_SIZE,
+              (index + 1) * DOCKER_WATCH_PAGE_SIZE,
+            ),
+        );
+  for (const containers of groups) {
+    const body = report.available
+      ? { available: true, containers }
+      : {
+          available: false,
+          errorCode: report.errorCode,
+          containers: [],
+        };
+    const response = await fetch(
+      `${config.monitorBaseUrl}/api/v1/agents/docker-watch-status`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${state.agentToken}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      },
+    );
+    if (!response.ok) {
+      throw new ReceiverResponseError(response.status);
+    }
+  }
+}
+
+async function runDockerWatch(
+  state: AgentState,
+  config: ReturnType<typeof loadAgentConfig>,
+  initialIntervalSeconds: number,
+): Promise<void> {
+  let intervalSeconds = initialIntervalSeconds;
+  let retryDelay = intervalSeconds * 1000;
+
+  while (!stopping) {
+    try {
+      const names = await fetchDockerWatchPolicy(state, config);
+      const report = await collectDockerContainerSnapshots(names);
+      await sendDockerWatchReport(state, config, report);
+      retryDelay = intervalSeconds * 1000;
+      await wait(retryDelay);
+    } catch (error) {
+      if (stopping) {
+        return;
+      }
+      await recordError(
+        state,
+        config,
+        "docker_watch_upload",
+        "Docker watch check failed; retrying",
+        error,
+      );
+      await wait(retryDelay);
+      retryDelay = Math.min(retryDelay * 2, MAX_RETRY_DELAY_MS);
+    }
+  }
 }
 
 async function runMetrics(
@@ -557,6 +734,7 @@ async function main(): Promise<void> {
   await Promise.all([
     runHeartbeats(state, config, heartbeatIntervalSeconds),
     runMetrics(state, config, heartbeatIntervalSeconds),
+    runDockerWatch(state, config, heartbeatIntervalSeconds),
     runAuthenticationJournalReader(state, config),
   ]);
 }
