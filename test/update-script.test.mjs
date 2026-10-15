@@ -20,6 +20,9 @@ test("updater is executable, syntactically valid, and checks before restarting",
   assert.match(source, /git -C "\$REPOSITORY_DIR" merge --ff-only/);
   assert.match(source, /xgs-monitor-agent-successful-update/);
   assert.match(source, /flock -n 9/);
+  assert.match(source, /X   X   GGGGG   SSSSS/);
+  assert.match(source, /run_step\(\)/);
+  assert.match(source, /cat "\$output_log" >&2/);
   assert.ok(
     source.indexOf("npm test") <
       source.indexOf('systemctl restart "$SERVICE_NAME"'),

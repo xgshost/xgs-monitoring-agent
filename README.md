@@ -122,7 +122,8 @@ sudo /opt/xgs-monitoring-agent/update.sh
 The updater refuses dirty or non-`main` checkouts, pulls only fast-forward
 changes, and builds/tests before restarting the service. It does not discard
 local changes or configure passwordless sudo. The agent has no remote shell or
-server-control feature.
+server-control feature. It prints concise progress, with detailed command
+output shown only when a step fails.
 
 ## Optional automatic updates
 
