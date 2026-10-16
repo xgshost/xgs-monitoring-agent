@@ -17,7 +17,7 @@ unprivileged systemd service and does not execute commands remotely.
 
 ## Install
 
-1. Run `/enroll` in the monitoring Discord server and keep the one-use token
+1. Run `/monitor enroll` in the monitoring Discord server and keep the one-use token
    private. The command returns `XGS_MONITOR_URL` and
    `XGS_MONITOR_ENROLLMENT_TOKEN`.
 2. On the monitored server, clone this public agent-only repository and run
@@ -45,6 +45,23 @@ journal access separately for each host. If enrollment succeeds, the installer
 removes the spent token from the protected environment file. If it times out,
 the token remains there so the agent can retry; inspect the service logs before
 requesting a new token.
+
+## Re-enroll an existing agent
+
+If an enrollment token expires or a server needs a fresh monitoring enrollment,
+create a new `/monitor enroll` entry in Discord. On the server, update the
+repository and run the re-enrollment script:
+
+```sh
+sudo /opt/xgs-monitoring-agent/update.sh
+sudo /opt/xgs-monitoring-agent/reenroll.sh
+```
+
+The script reuses the configured monitoring URL, prompts for the one-use token
+without echoing it, and writes a new state file so the existing agent state is
+preserved. After enrollment succeeds, it removes the token from the protected
+environment file and verifies that the agent service is active. If enrollment
+is not confirmed, the token remains protected so the agent can retry.
 
 Operational errors are written as structured JSON lines next to the agent state
 file and forwarded to the central receiver after enrollment. Reports contain
