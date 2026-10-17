@@ -21,6 +21,8 @@ test("agent installer is executable, syntactically valid, and documents usage", 
   assert.match(installerSource, /chmod -R u=rwX,go=rX "\$SCRIPT_DIR\/dist"/);
   assert.match(installerSource, /^  update\.sh \\$/m);
   assert.match(installerSource, /^  auto-update\.sh \\$/m);
+  assert.match(installerSource, /^  install-ban-sync\.sh \\$/m);
+  assert.match(installerSource, /^  reenroll\.sh \\$/m);
   assert.match(installerSource, /^  deploy \\$/m);
   assert.match(installerSource, /^  sudo \.\/install\.sh --enable-docker-watch$/m);
   assert.match(

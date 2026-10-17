@@ -216,6 +216,8 @@ cp -a \
   install.sh \
   update.sh \
   auto-update.sh \
+  install-ban-sync.sh \
+  reenroll.sh \
   package.json \
   package-lock.json \
   tsconfig.json \
