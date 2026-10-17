@@ -72,7 +72,9 @@ copy; it remains available if the central server cannot be reached.
 Telemetry includes CPU utilization/load, memory and swap, per-filesystem space
 and inode usage, uptime, OS/kernel version, CPU and block-device inventory,
 agent version, boot ID, Docker daemon state when installed, and optional
-systemd service states. Container monitoring is controlled centrally with
+systemd service states. Pseudo-filesystems and repeated mounts of the same
+device are excluded from disk-capacity reporting. Container monitoring is
+controlled centrally with
 `/docker-watch`; the agent queries only centrally allowlisted names and reads
 container state, configured health-check status, and restart counts. It does
 not collect container logs or environment variables. A separate name-only

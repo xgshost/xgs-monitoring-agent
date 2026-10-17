@@ -19,6 +19,7 @@ test("agent installer is executable, syntactically valid, and documents usage", 
   assert.doesNotThrow(() => accessSync(installerPath, constants.X_OK));
   const installerSource = readFileSync(installerPath, "utf8");
   assert.match(installerSource, /chmod -R u=rwX,go=rX "\$SCRIPT_DIR\/dist"/);
+  assert.match(installerSource, /X   X   GGGGG   SSSSS/);
   assert.match(installerSource, /^  update\.sh \\$/m);
   assert.match(installerSource, /^  auto-update\.sh \\$/m);
   assert.match(installerSource, /^  install-ban-sync\.sh \\$/m);
@@ -38,6 +39,7 @@ test("agent installer is executable, syntactically valid, and documents usage", 
   const help = spawnSync(installerPath, ["--help"], { encoding: "utf8" });
   assert.equal(help.status, 0, help.stderr);
   assert.match(help.stdout, /sudo \.\/install\.sh/);
+  assert.match(help.stdout, /XGS Monitoring Agent installer/);
   assert.match(help.stdout, /--enable-docker-watch/);
   assert.match(help.stdout, /one-use enrollment token/);
 });

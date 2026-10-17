@@ -28,6 +28,7 @@ test("automatic updates are opt-in and use a daily systemd timer", () => {
   assert.match(timer, /^OnCalendar=daily$/m);
   assert.match(timer, /^RandomizedDelaySec=30m$/m);
   assert.match(service, /^ExecStart=\/opt\/xgs-monitoring-agent\/update\.sh$/m);
+  assert.match(updater, /X   X   GGGGG   SSSSS/);
   assert.match(updater, /systemctl enable --now "\$TIMER_UNIT"/);
   assert.match(updater, /systemctl disable --now "\$TIMER_UNIT"/);
 });

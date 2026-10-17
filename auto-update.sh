@@ -8,8 +8,26 @@ readonly SERVICE_UNIT="xgs-monitor-agent-update.service"
 readonly TIMER_UNIT="xgs-monitor-agent-update.timer"
 
 fail() {
-  printf 'Auto-update setup error: %s\n' "$1" >&2
+  printf 'XGS Monitoring Agent auto-update: %s\n' "$1" >&2
   exit 1
+}
+
+print_banner() {
+  local component="$1"
+  if [[ -t 1 ]]; then
+    cat <<'BANNER'
+X   X   GGGGG   SSSSS
+ X X    G       S
+  X     G GGG   SSSSS
+ X X    G   G       S
+X   X   GGGGG   SSSSS
+
+       XGS MONITORING AGENT
+BANNER
+    printf '          %s\n' "$component"
+  else
+    printf 'XGS Monitoring Agent %s\n' "$component"
+  fi
 }
 
 usage() {
@@ -22,6 +40,8 @@ Usage:
   sudo ./auto-update.sh status
 HELP
 }
+
+print_banner "auto-update setup"
 
 if [[ ${EUID} -ne 0 ]]; then
   fail "Run with sudo: sudo ./auto-update.sh <enable|disable|status>"
@@ -53,11 +73,11 @@ case "$action" in
     systemctl enable --now "$TIMER_UNIT"
     systemctl is-active --quiet "$TIMER_UNIT" ||
       fail "The update timer did not become active"
-    printf 'Daily agent auto-update timer enabled.\n'
+    printf 'Auto-update timer enabled (daily).\n'
     ;;
   disable)
     if [[ ! -e "$SYSTEMD_DIR/$TIMER_UNIT" ]]; then
-      printf 'Agent auto-update timer is not installed; it is already disabled.\n'
+      printf 'Auto-update timer is not installed; nothing to disable.\n'
       exit 0
     fi
     if systemctl is-enabled --quiet "$TIMER_UNIT"; then
@@ -65,17 +85,17 @@ case "$action" in
     else
       systemctl stop "$TIMER_UNIT"
     fi
-    printf 'Agent auto-update timer disabled.\n'
+    printf 'Auto-update timer disabled.\n'
     ;;
   status)
     if [[ ! -e "$SYSTEMD_DIR/$TIMER_UNIT" ]]; then
-      printf 'Agent auto-update timer is not installed; it is disabled.\n'
+      printf 'Auto-update timer is not installed (disabled).\n'
       exit 0
     fi
     if systemctl is-enabled --quiet "$TIMER_UNIT"; then
-      printf 'Agent auto-update timer is enabled.\n'
+      printf 'Auto-update timer: enabled.\n'
     else
-      printf 'Agent auto-update timer is disabled.\n'
+      printf 'Auto-update timer: disabled.\n'
     fi
     systemctl list-timers --all --no-pager "$TIMER_UNIT"
     ;;

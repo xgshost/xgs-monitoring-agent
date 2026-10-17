@@ -14,8 +14,26 @@ readonly NODE_SOURCE_FINGERPRINT="6F71F525282841EEDAF851B42F59B5F99B1BE0B4"
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 
 fail() {
-  printf 'Installer error: %s\n' "$1" >&2
+  printf 'XGS Monitoring Agent installer: %s\n' "$1" >&2
   exit 1
+}
+
+print_banner() {
+  local component="$1"
+  if [[ -t 1 ]]; then
+    cat <<'BANNER'
+X   X   GGGGG   SSSSS
+ X X    G       S
+  X     G GGG   SSSSS
+ X X    G   G       S
+X   X   GGGGG   SSSSS
+
+       XGS MONITORING AGENT
+BANNER
+    printf '             %s\n' "$component"
+  else
+    printf 'XGS Monitoring Agent %s\n' "$component"
+  fi
 }
 
 confirm() {
@@ -25,6 +43,7 @@ confirm() {
 }
 
 if [[ "${1:-}" == "--help" ]]; then
+  print_banner "installer"
   cat <<'HELP'
 Install the XGS Monitoring Agent on Debian or Ubuntu.
 
@@ -41,6 +60,7 @@ HELP
 fi
 
 if [[ "${1:-}" == "--enable-docker-watch" ]]; then
+  print_banner "installer"
   [[ "$#" -eq 1 ]] || fail "Usage: sudo ./install.sh --enable-docker-watch"
   [[ "$EUID" -eq 0 ]] || fail "Run with sudo: sudo ./install.sh --enable-docker-watch"
   command -v systemctl >/dev/null || fail "systemd is required"
@@ -61,11 +81,12 @@ if [[ "${1:-}" == "--enable-docker-watch" ]]; then
   systemctl restart xgs-monitor-agent.service
   systemctl is-active --quiet xgs-monitor-agent.service ||
     fail "Docker access was granted but the agent service is not active"
-  printf 'Docker access enabled for %s; its service is active.\n' "$SERVICE_USER"
+  printf 'Docker monitoring enabled for %s; service is active.\n' "$SERVICE_USER"
   exit 0
 fi
 
 [[ "$#" -eq 0 ]] || fail "Unknown option: $1"
+print_banner "installer"
 [[ "$EUID" -eq 0 ]] || fail "Run with sudo: sudo ./install.sh"
 [[ -f /etc/os-release ]] || fail "Cannot identify this operating system"
 # shellcheck disable=SC1091
@@ -113,9 +134,10 @@ if command -v node >/dev/null 2>&1; then
   fi
 fi
 
-printf 'This will install Node.js 22 from NodeSource, build and test the agent,\n'
-printf 'create its unprivileged service account, save enrollment credentials,\n'
-printf 'and enable the systemd service. It will not execute remote commands.\n'
+printf 'Install plan:\n'
+printf '  - Install Node.js 22, then build and test the agent.\n'
+printf '  - Create an unprivileged service account and store enrollment settings.\n'
+printf '  - Enable the service; the agent will not execute remote commands.\n'
 confirm "Continue with the installation?" || fail "Cancelled"
 
 monitor_url=""
@@ -143,7 +165,7 @@ if command -v docker >/dev/null 2>&1 && getent group docker >/dev/null; then
     docker_group_available=true
   fi
 else
-  printf 'Docker CLI or docker group not found; Docker socket access will remain disabled.\n'
+  printf 'Docker CLI or group unavailable; container monitoring will remain disabled.\n'
 fi
 
 temp_dir="$(mktemp -d "${TMPDIR:-/tmp}/xgs-monitor-agent-install.XXXXXX")"
@@ -153,11 +175,26 @@ cleanup_build() {
     rm -rf -- "$build_dir"
   fi
 }
+run_build_step() {
+  local label="$1"
+  shift
+  local output_log="$build_dir/xgs-agent-build.log"
+
+  printf '  %s: ' "$label"
+  if "$@" >"$output_log" 2>&1; then
+    printf 'OK\n'
+  else
+    local status=$?
+    printf 'FAILED\n' >&2
+    cat "$output_log" >&2
+    return "$status"
+  fi
+}
 trap 'cleanup_build; rm -f "$temp_dir/nodesource-key.asc" "$temp_dir/nodesource-keyring.gpg" "$temp_dir/nodesource.sources"; rmdir "$temp_dir" 2>/dev/null || true' EXIT
 
 if command -v node >/dev/null 2>&1 && [[ "$(node --version)" == v22.* ]] &&
   command -v npm >/dev/null 2>&1; then
-  printf 'Using existing Node.js %s and npm.\n' "$(node --version)"
+  printf 'Node.js 22 is already installed; reusing it.\n'
 else
   apt-get update
   DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl gnupg
@@ -226,11 +263,11 @@ cp -a \
   deploy \
   "$build_dir/"
 chown -R nobody:nogroup "$build_dir"
-runuser -u nobody -- env HOME="$build_dir/home" \
+run_build_step "Install dependencies" runuser -u nobody -- env HOME="$build_dir/home" \
   npm --prefix "$build_dir" ci --ignore-scripts
-runuser -u nobody -- env HOME="$build_dir/home" \
+run_build_step "Build agent" runuser -u nobody -- env HOME="$build_dir/home" \
   npm --prefix "$build_dir" run build
-runuser -u nobody -- env HOME="$build_dir/home" \
+run_build_step "Run tests" runuser -u nobody -- env HOME="$build_dir/home" \
   npm --prefix "$build_dir" test
 install -d -o root -g root -m 0755 "$SCRIPT_DIR/dist"
 cp -a "$build_dir/dist/." "$SCRIPT_DIR/dist/"
@@ -284,11 +321,11 @@ if [[ "$enrolled" == true ]]; then
   systemctl restart xgs-monitor-agent
   systemctl is-active --quiet xgs-monitor-agent ||
     fail "Enrollment succeeded but the agent service is not active"
-  printf 'Enrollment completed. The one-use token was removed from %s.\n' "$ENV_FILE"
+  printf 'Enrollment complete; the one-use token was removed from %s.\n' "$ENV_FILE"
 else
   printf 'Enrollment has not completed yet; the enrollment token remains in %s for retry.\n' "$ENV_FILE" >&2
   printf 'Check service logs with: journalctl -u xgs-monitor-agent -n 50 --no-pager\n' >&2
   exit 1
 fi
 
-printf 'Agent enrollment succeeded and its heartbeat service is active.\n'
+printf 'Installation complete; the agent is enrolled and active.\n'

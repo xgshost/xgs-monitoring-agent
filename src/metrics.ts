@@ -6,13 +6,16 @@ const MAX_FILESYSTEMS = 40;
 const MAX_BLOCK_DEVICES = 32;
 const PSEUDO_FILESYSTEMS = new Set([
   "autofs",
+  "binfmt_misc",
   "cgroup",
   "cgroup2",
   "configfs",
   "debugfs",
   "devpts",
   "devtmpfs",
+  "efivarfs",
   "fusectl",
+  "hugetlbfs",
   "mqueue",
   "overlay",
   "proc",
@@ -21,6 +24,11 @@ const PSEUDO_FILESYSTEMS = new Set([
   "sysfs",
   "tmpfs",
   "tracefs",
+]);
+const PSEUDO_MOUNT_POINTS = new Set([
+  "/etc/pve",
+  "/run/rpc_pipefs",
+  "/var/lib/lxcfs",
 ]);
 const SERVICE_STATES = new Set([
   "active",
@@ -178,7 +186,10 @@ export function parseMountInfo(contents: string): Array<{
   mountPoint: string;
   filesystem: string;
 }> {
-  const mounts = new Map<string, string>();
+  const mounts = new Map<
+    string,
+    { filesystem: string; deviceId: string }
+  >();
   for (const line of contents.split(/\r?\n/)) {
     if (!line) {
       continue;
@@ -189,25 +200,39 @@ export function parseMountInfo(contents: string): Array<{
     }
     const beforeSeparator = line.slice(0, separator).split(" ");
     const afterSeparator = line.slice(separator + 3).split(" ");
+    const deviceId = beforeSeparator[2] ?? "";
     const mountPoint = decodeMountField(beforeSeparator[4] ?? "");
     const filesystem = afterSeparator[0] ?? "";
     if (
       !mountPoint.startsWith("/") ||
       !filesystem ||
       PSEUDO_FILESYSTEMS.has(filesystem) ||
+      PSEUDO_MOUNT_POINTS.has(mountPoint) ||
       mounts.has(mountPoint)
     ) {
       continue;
     }
-    mounts.set(mountPoint, filesystem);
+    mounts.set(mountPoint, { filesystem, deviceId });
   }
 
+  const seenDevices = new Set<string>();
   return Array.from(mounts, ([mountPoint, filesystem]) => ({
     mountPoint,
-    filesystem,
+    ...filesystem,
   }))
     .sort((left, right) => left.mountPoint.localeCompare(right.mountPoint))
-    .slice(0, MAX_FILESYSTEMS);
+    .filter(({ deviceId }) => {
+      if (!deviceId) {
+        return true;
+      }
+      if (seenDevices.has(deviceId)) {
+        return false;
+      }
+      seenDevices.add(deviceId);
+      return true;
+    })
+    .slice(0, MAX_FILESYSTEMS)
+    .map(({ mountPoint, filesystem }) => ({ mountPoint, filesystem }));
 }
 
 function toSafeNumber(value: bigint, label: string): number {

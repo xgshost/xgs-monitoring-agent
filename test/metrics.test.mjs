@@ -44,11 +44,18 @@ test("parses memory and swap counters from procfs", () => {
   );
 });
 
-test("parses real mount points while excluding pseudo filesystems", () => {
+test("parses unique disk-backed mounts while excluding pseudo filesystems", () => {
   const mounts = parseMountInfo([
     "24 1 8:1 / / rw,relatime - ext4 /dev/sda1 rw",
-    "25 1 8:1 /data /mnt/data\\040disk rw,relatime - ext4 /dev/sda1 rw",
-    "26 1 0:5 / /proc rw,nosuid - proc proc rw",
+    "25 1 8:1 /var/tmp /var/tmp rw,relatime - ext4 /dev/sda1 rw",
+    "26 1 8:2 /data /mnt/data\\040disk rw,relatime - ext4 /dev/sda2 rw",
+    "27 1 0:5 / /proc rw,nosuid - proc proc rw",
+    "28 1 0:30 / /dev/hugepages rw,nosuid - hugetlbfs hugetlbfs rw",
+    "29 1 0:31 / /proc/sys/fs/binfmt_misc rw,nosuid - binfmt_misc binfmt_misc rw",
+    "30 1 0:32 / /sys/firmware/efi/efivars rw,nosuid - efivarfs efivarfs rw",
+    "31 1 0:33 / /etc/pve rw - fuse fuse rw",
+    "32 1 0:34 / /run/rpc_pipefs rw - fuse fuse rw",
+    "33 1 0:35 / /var/lib/lxcfs rw - fuse lxcfs rw",
   ].join("\n"));
 
   assert.deepEqual(mounts, [
