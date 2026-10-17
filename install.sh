@@ -12,6 +12,7 @@ readonly NODE_SOURCE_KEYRING="/usr/share/keyrings/xgs-nodesource.gpg"
 readonly NODE_SOURCE_FILE="/etc/apt/sources.list.d/xgs-nodesource-node22.sources"
 readonly NODE_SOURCE_FINGERPRINT="6F71F525282841EEDAF851B42F59B5F99B1BE0B4"
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+source "$SCRIPT_DIR/update-sudoers.sh"
 
 fail() {
   printf 'XGS Monitoring Agent installer: %s\n' "$1" >&2
@@ -53,6 +54,8 @@ Run from /opt/xgs-monitoring-agent:
 
 The installer requires an interactive terminal to collect the service URL,
 one-use enrollment token, and explicit journal-read permission consent.
+When run through sudo, it grants the invoking user passwordless access to the
+agent updater only.
 The Docker-watch option requires an existing installation and restarts its
 agent service after granting Docker-group access.
 HELP
@@ -138,6 +141,7 @@ printf 'Install plan:\n'
 printf '  - Install Node.js 22, then build and test the agent.\n'
 printf '  - Create an unprivileged service account and store enrollment settings.\n'
 printf '  - Enable the service; the agent will not execute remote commands.\n'
+printf '  - If run through sudo, allow the caller to run only the agent updater without a password.\n'
 confirm "Continue with the installation?" || fail "Cancelled"
 
 monitor_url=""
@@ -252,6 +256,7 @@ install -d -o nobody -g nogroup -m 0700 "$build_dir/home"
 cp -a \
   install.sh \
   update.sh \
+  update-sudoers.sh \
   auto-update.sh \
   install-ban-sync.sh \
   reenroll.sh \
@@ -329,3 +334,4 @@ else
 fi
 
 printf 'Installation complete; the agent is enrolled and active.\n'
+ensure_update_sudoers_rule

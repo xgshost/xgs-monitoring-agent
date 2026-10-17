@@ -88,6 +88,11 @@ To monitor additional systemd services, add a comma-separated allowlist such as
 `XGS_MONITOR_SERVICES=nginx.service,pteroq.service` to
 `/etc/xgs-monitor-agent.env`, then restart the agent.
 
+When `install.sh` or `update.sh` is run through `sudo`, it adds a passwordless
+sudo rule for that invoking user, limited to `/opt/xgs-monitoring-agent/update.sh`
+with no arguments. The rule is validated with `visudo` and added only if missing;
+direct root and systemd runs do not grant access to another user.
+
 The central service schedules OS, Hardware, and General history reports at
 15-minute, daily, and hourly intervals. Older agents continue heartbeat and
 SSH reporting, but do not report sudo failures or provide telemetry until
@@ -129,7 +134,8 @@ The updater is manual; the agent never updates itself. For the first update on
 an existing installation, pull the updater and run it:
 
 ```sh
-sudo bash -c 'git -C /opt/xgs-monitoring-agent pull --ff-only origin main && /opt/xgs-monitoring-agent/update.sh --rebuild-current'
+sudo git -C /opt/xgs-monitoring-agent pull --ff-only origin main
+sudo /opt/xgs-monitoring-agent/update.sh --rebuild-current
 ```
 
 For later updates, run:
@@ -140,9 +146,15 @@ sudo /opt/xgs-monitoring-agent/update.sh
 
 The updater refuses dirty or non-`main` checkouts, pulls only fast-forward
 changes, and builds/tests before restarting the service. It does not discard
-local changes or configure passwordless sudo. The agent has no remote shell or
-server-control feature. It prints concise progress, with detailed command
+local changes. When invoked through sudo, it adds the validated, no-argument
+updater rule for that invoking user if missing. The agent has no remote shell
+or server-control feature. It prints concise progress, with detailed command
 output shown only when a step fails.
+
+On an existing installation older than v0.3.2, run the first update with sudo,
+then run the newly installed updater once more with sudo to create the rule.
+The second run provisions it even if the agent is already up to date; future
+no-argument updater runs can use the new rule.
 
 ## Optional automatic updates
 

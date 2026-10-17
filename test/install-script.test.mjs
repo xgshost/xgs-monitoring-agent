@@ -20,6 +20,9 @@ test("agent installer is executable, syntactically valid, and documents usage", 
   const installerSource = readFileSync(installerPath, "utf8");
   assert.match(installerSource, /chmod -R u=rwX,go=rX "\$SCRIPT_DIR\/dist"/);
   assert.match(installerSource, /X   X   GGGGG   SSSSS/);
+  assert.match(installerSource, /source "\$SCRIPT_DIR\/update-sudoers\.sh"/);
+  assert.match(installerSource, /ensure_update_sudoers_rule/);
+  assert.match(installerSource, /^  update-sudoers\.sh \\$/m);
   assert.match(installerSource, /^  update\.sh \\$/m);
   assert.match(installerSource, /^  auto-update\.sh \\$/m);
   assert.match(installerSource, /^  install-ban-sync\.sh \\$/m);

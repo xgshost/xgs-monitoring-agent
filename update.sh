@@ -4,6 +4,8 @@ set -Eeuo pipefail
 readonly REPOSITORY_DIR="/opt/xgs-monitoring-agent"
 readonly SERVICE_NAME="xgs-monitor-agent"
 readonly SUCCESS_MARKER="${REPOSITORY_DIR}/.git/xgs-monitor-agent-successful-update"
+readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+source "$SCRIPT_DIR/update-sudoers.sh"
 
 print_banner() {
   local component="$1"
@@ -66,6 +68,8 @@ if ! flock -n 9; then
   printf 'Update already running; skipped.\n'
   exit 0
 fi
+
+ensure_update_sudoers_rule
 
 output_log="$(mktemp "${TMPDIR:-/tmp}/xgs-monitor-agent-update.XXXXXX")"
 trap 'rm -f -- "$output_log"' EXIT

@@ -23,6 +23,12 @@ test("updater is executable, syntactically valid, and checks before restarting",
   assert.match(source, /X   X   GGGGG   SSSSS/);
   assert.match(source, /printf '  %s: '/);
   assert.match(source, /printf 'OK\\n'/);
+  assert.match(source, /source "\$SCRIPT_DIR\/update-sudoers\.sh"/);
+  assert.match(source, /ensure_update_sudoers_rule/);
+  assert.ok(
+    source.indexOf("ensure_update_sudoers_rule") <
+      source.indexOf('if [[ "$current_commit" == "$available_commit"'),
+  );
   assert.match(source, /run_step\(\)/);
   assert.match(source, /cat "\$output_log" >&2/);
   assert.ok(
