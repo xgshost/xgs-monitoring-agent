@@ -11,7 +11,7 @@ unprivileged systemd service and does not execute commands remotely.
 ## Requirements
 
 - Debian or Ubuntu with systemd and `journalctl`
-- Node.js 22 and npm
+- Node.js 22 and npm (the installer installs these when needed)
 - An administrator-approved way for the agent user to read authentication
   journal entries
 
@@ -32,9 +32,13 @@ unprivileged systemd service and does not execute commands remotely.
 The installer verifies Debian/Ubuntu, installs Node.js 22 through the signed
 NodeSource APT repository when needed, builds and tests the agent, creates its
 non-root service account, installs the systemd unit, and starts the service. It
-prompts for the monitoring URL and one-use token without echoing the token. On
-hosts with the Docker CLI and `docker` group, it also asks whether to grant the
-agent Docker access; this is root-equivalent access to that host.
+prompts for the monitoring URL and one-use token without echoing the token. If
+the only APT update failure is an unauthorized PBS Enterprise repository, it
+logs the output and continues without changing APT sources; other APT update
+failures stop the installer and print their output. Unhandled command failures
+report the installer line and exit status. On hosts with the Docker CLI and
+`docker` group, it also asks whether to grant the agent Docker access; this is
+root-equivalent access to that host.
 
 Before granting journal access, it explains that the
 `systemd-journal` group permits reading all system journal entries; the agent

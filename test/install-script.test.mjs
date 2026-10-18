@@ -18,6 +18,8 @@ const banServicePath = fileURLToPath(
 test("agent installer is executable, syntactically valid, and documents usage", () => {
   assert.doesNotThrow(() => accessSync(installerPath, constants.X_OK));
   const installerSource = readFileSync(installerPath, "utf8");
+  assert.match(installerSource, /source "\$SCRIPT_DIR\/apt-update\.sh"/);
+  assert.match(installerSource, /trap report_unhandled_failure ERR/);
   assert.match(installerSource, /chmod -R u=rwX,go=rX "\$SCRIPT_DIR\/dist"/);
   assert.match(installerSource, /X   X   GGGGG   SSSSS/);
   assert.match(installerSource, /source "\$SCRIPT_DIR\/update-sudoers\.sh"/);
@@ -45,6 +47,34 @@ test("agent installer is executable, syntactically valid, and documents usage", 
   assert.match(help.stdout, /XGS Monitoring Agent installer/);
   assert.match(help.stdout, /--enable-docker-watch/);
   assert.match(help.stdout, /one-use enrollment token/);
+});
+
+test("agent installer reports unhandled failures with line and exit status", () => {
+  const installerSource = readFileSync(installerPath, "utf8");
+  const failureHandler = installerSource.match(
+    /report_unhandled_failure\(\) \{[\s\S]*?\n\}/,
+  );
+  assert.ok(failureHandler);
+
+  const result = spawnSync(
+    "bash",
+    [
+      "-c",
+      [
+        "set -Eeuo pipefail",
+        failureHandler[0],
+        "trap report_unhandled_failure ERR",
+        "false",
+      ].join("\n"),
+    ],
+    { encoding: "utf8" },
+  );
+
+  assert.equal(result.status, 1);
+  assert.match(
+    result.stderr,
+    /XGS Monitoring Agent installer: failed at line \d+ \(exit status 1\)\./,
+  );
 });
 
 test("ban installer migrates to Fail2ban/UFW with explicit confirmation", () => {

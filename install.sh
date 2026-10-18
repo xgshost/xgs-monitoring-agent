@@ -13,11 +13,22 @@ readonly NODE_SOURCE_FILE="/etc/apt/sources.list.d/xgs-nodesource-node22.sources
 readonly NODE_SOURCE_FINGERPRINT="6F71F525282841EEDAF851B42F59B5F99B1BE0B4"
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 source "$SCRIPT_DIR/update-sudoers.sh"
+source "$SCRIPT_DIR/apt-update.sh"
 
 fail() {
   printf 'XGS Monitoring Agent installer: %s\n' "$1" >&2
   exit 1
 }
+
+report_unhandled_failure() {
+  local status=$?
+  local line="${BASH_LINENO[0]:-unknown}"
+  trap - ERR
+  printf 'XGS Monitoring Agent installer: failed at line %s (exit status %s).\n' \
+    "$line" "$status" >&2
+  exit "$status"
+}
+trap report_unhandled_failure ERR
 
 print_banner() {
   local component="$1"
@@ -200,7 +211,7 @@ if command -v node >/dev/null 2>&1 && [[ "$(node --version)" == v22.* ]] &&
   command -v npm >/dev/null 2>&1; then
   printf 'Node.js 22 is already installed; reusing it.\n'
 else
-  apt-get update
+  apt_update
   DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl gnupg
 
   if [[ -e "$NODE_SOURCE_FILE" || -e "$NODE_SOURCE_KEYRING" ]]; then
@@ -242,7 +253,7 @@ SOURCES
       "$temp_dir/nodesource.sources" "$NODE_SOURCE_FILE"
   fi
 
-  apt-get update
+  apt_update
   DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs
 fi
 
@@ -255,6 +266,7 @@ build_dir="$(mktemp -d "${TMPDIR:-/var/tmp}/xgs-monitor-agent-build.XXXXXX")"
 install -d -o nobody -g nogroup -m 0700 "$build_dir/home"
 cp -a \
   install.sh \
+  apt-update.sh \
   update.sh \
   update-sudoers.sh \
   auto-update.sh \
