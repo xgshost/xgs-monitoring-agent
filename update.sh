@@ -133,6 +133,7 @@ fi
 if [[ "$current_commit" == "$available_commit" &&
   "$successful_commit" == "$current_commit" &&
   "$rebuild_current" != true ]]; then
+  update_ban_sync_if_ufw_active
   printf 'Already up to date (%s).\n' "${current_commit:0:7}"
   exit 0
 fi

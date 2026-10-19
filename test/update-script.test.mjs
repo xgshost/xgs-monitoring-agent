@@ -29,6 +29,16 @@ test("updater is executable, syntactically valid, and checks before restarting",
     source.indexOf("ensure_update_sudoers_rule") <
       source.indexOf('if [[ "$current_commit" == "$available_commit"'),
   );
+  const upToDateCheck = source.indexOf(
+    'if [[ "$current_commit" == "$available_commit"',
+  );
+  const upToDateExit = source.indexOf("Already up to date", upToDateCheck);
+  const reconcileBeforeUpToDateExit = source.indexOf(
+    "update_ban_sync_if_ufw_active",
+    upToDateCheck,
+  );
+  assert.ok(reconcileBeforeUpToDateExit > upToDateCheck);
+  assert.ok(reconcileBeforeUpToDateExit < upToDateExit);
   assert.match(source, /run_step\(\)/);
   assert.match(source, /cat "\$output_log" >&2/);
   assert.match(source, /update_ban_sync_if_ufw_active\(\)/);
