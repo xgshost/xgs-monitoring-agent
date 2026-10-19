@@ -31,6 +31,8 @@ test("agent installer is executable, syntactically valid, and documents usage", 
   assert.match(installerSource, /source "\$SCRIPT_DIR\/update-sudoers\.sh"/);
   assert.match(installerSource, /ensure_update_sudoers_rule/);
   assert.match(installerSource, /install_ban_sync_if_ufw_active/);
+  assert.match(installerSource, /xgs-monitor-agent-ban-sync\.disabled/);
+  assert.match(installerSource, /disabled by this host; leaving it disabled/);
   assert.match(installerSource, /command -v ufw/);
   assert.match(installerSource, /Status: active/);
   assert.match(installerSource, /SSH autoban synchronization was not enabled/);
@@ -112,13 +114,44 @@ test("ban installer migrates to Fail2ban/UFW with explicit confirmation", () => 
   assert.match(customJail, /^filter = sshd$/m);
   assert.match(defaultSshJailOverride, /^\[sshd\]$/m);
   assert.match(defaultSshJailOverride, /^enabled = false$/m);
-  assert.ok(
-    source.indexOf('systemctl start "$SERVICE_NAME"') <
-      source.indexOf("nft delete table inet xgs_monitor_agent"),
+  const installationStart = source.indexOf('systemctl start "$SERVICE_NAME"');
+  const installationNftCleanup = source.indexOf(
+    "nft delete table inet xgs_monitor_agent",
+    installationStart,
   );
+  assert.ok(installationStart >= 0);
+  assert.ok(installationNftCleanup > installationStart);
   assert.doesNotMatch(source, /systemctl (?:enable|start) ufw\.service/);
   assert.doesNotMatch(source, /apt-get install[^'\n]*nftables/);
   assert.match(source, /assume_yes=true/);
+  assert.match(source, /--remove/);
+  assert.match(source, /xgs-monitor-agent-ban-sync\.disabled/);
+  assert.match(source, /fail2ban-client set xgs-monitor-agent unbanip/);
+  assert.match(source, /nft delete table inet xgs_monitor_agent/);
+  assert.match(source, /UFW defaults and unrelated rules were left unchanged/);
+  const removalStart = source.indexOf("remove_ban_sync()");
+  const backupCreated = source.indexOf(
+    'backup_dir="$(mktemp -d /var/backups/xgs-monitor-agent-ban-sync.',
+    removalStart,
+  );
+  const markerCreated = source.indexOf('mv -f -- "$marker_tmp" "$DISABLED_MARKER"', removalStart);
+  const timerStopped = source.indexOf('systemctl disable --now "$TIMER_NAME"', removalStart);
+  const xgsBansCleared = source.indexOf(
+    "fail2ban-client set xgs-monitor-agent unbanip",
+    removalStart,
+  );
+  const nftRemoved = source.indexOf(
+    "nft delete table inet xgs_monitor_agent",
+    removalStart,
+  );
+  const managedFilesRemoved = source.indexOf('rm -f -- \\', removalStart);
+  assert.ok(backupCreated > removalStart);
+  assert.ok(markerCreated > backupCreated);
+  assert.ok(timerStopped > markerCreated);
+  assert.ok(xgsBansCleared > timerStopped);
+  assert.ok(nftRemoved > xgsBansCleared);
+  assert.ok(managedFilesRemoved > nftRemoved);
+  assert.doesNotMatch(source, /ufw (?:reset|default)/);
   assert.match(source, /Continuing with confirmation from the main agent installer/);
 
   const syntaxCheck = spawnSync("bash", ["-n", banInstallerPath], {
@@ -130,6 +163,7 @@ test("ban installer migrates to Fail2ban/UFW with explicit confirmation", () => 
   assert.equal(help.status, 0, help.stderr);
   assert.match(help.stdout, /sudo \.\/install-ban-sync\.sh/);
   assert.match(help.stdout, /sudo \.\/install-ban-sync\.sh --yes/);
+  assert.match(help.stdout, /sudo \.\/update\.sh --disable-ban-sync/);
   assert.match(help.stdout, /Central Discord autoban thresholds and allowlists remain unchanged/);
 });
 

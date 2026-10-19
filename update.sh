@@ -5,6 +5,7 @@ readonly REPOSITORY_DIR="/opt/xgs-monitoring-agent"
 readonly SERVICE_NAME="xgs-monitor-agent"
 readonly SUCCESS_MARKER="${REPOSITORY_DIR}/.git/xgs-monitor-agent-successful-update"
 readonly BAN_SYNC_TIMER="xgs-monitor-agent-firewall-sync.timer"
+readonly BAN_SYNC_DISABLED_MARKER="/etc/xgs-monitor-agent-ban-sync.disabled"
 readonly BAN_JAIL_CONFIG="/etc/fail2ban/jail.d/xgs-monitor-agent.conf"
 readonly DEFAULT_SSH_JAIL_OVERRIDE="/etc/fail2ban/jail.d/xgs-monitor-agent.local"
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -29,10 +30,13 @@ BANNER
 }
 
 rebuild_current=false
-if [[ "$#" -eq 1 && "$1" == "--rebuild-current" ]]; then
+disable_ban_sync=false
+if [[ "$#" -eq 1 && "$1" == "--disable-ban-sync" ]]; then
+  disable_ban_sync=true
+elif [[ "$#" -eq 1 && "$1" == "--rebuild-current" ]]; then
   rebuild_current=true
 elif [[ "$#" -ne 0 ]]; then
-  printf 'XGS Monitoring Agent updater: usage: sudo %s [--rebuild-current]\n' "$0" >&2
+  printf 'XGS Monitoring Agent updater: usage: sudo %s [--rebuild-current | --disable-ban-sync]\n' "$0" >&2
   exit 2
 fi
 
@@ -93,6 +97,12 @@ run_step() {
 }
 
 update_ban_sync_if_ufw_active() {
+  if [[ -e "$BAN_SYNC_DISABLED_MARKER" ]]; then
+    run_step "Keeping host SSH autoban sync disabled" \
+      "$REPOSITORY_DIR/install-ban-sync.sh" --remove
+    return 0
+  fi
+
   if ! command -v ufw >/dev/null 2>&1; then
     printf 'Warning: UFW is not installed; Fail2ban SSH setup was skipped during update.\n' >&2
     return 0
@@ -122,6 +132,13 @@ update_ban_sync_if_ufw_active() {
   run_step "Updating Fail2ban SSH policy" \
     "$REPOSITORY_DIR/install-ban-sync.sh" --yes
 }
+
+if [[ "$disable_ban_sync" == true ]]; then
+  run_step "Disabling host SSH autoban synchronization" \
+    "$REPOSITORY_DIR/install-ban-sync.sh" --remove
+  printf 'Host SSH autoban synchronization is disabled; the Monitoring agent remains active.\n'
+  exit 0
+fi
 
 run_step "Checking for updates" git -C "$REPOSITORY_DIR" fetch origin main
 current_commit="$(git -C "$REPOSITORY_DIR" rev-parse HEAD)"

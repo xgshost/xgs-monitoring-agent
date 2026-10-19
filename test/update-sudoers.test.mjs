@@ -16,6 +16,7 @@ test("sudoers helper scopes passwordless access to the invoking user and updater
     /NOPASSWD: \/opt\/xgs-monitoring-agent\/update\.sh/,
   );
   assert.ok(helperSource.includes('update.sh \\"\\"'));
+  assert.match(helperSource, /update\.sh --disable-ban-sync/);
   assert.match(helperSource, /grep -Fqx -- "\$rule" "\$sudoers_file"/);
   assert.match(helperSource, /visudo -cf/);
   assert.match(helperSource, /chmod 0440/);

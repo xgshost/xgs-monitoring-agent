@@ -94,8 +94,9 @@ To monitor additional systemd services, add a comma-separated allowlist such as
 
 When `install.sh` or `update.sh` is run through `sudo`, it adds a passwordless
 sudo rule for that invoking user, limited to `/opt/xgs-monitoring-agent/update.sh`
-with no arguments. The rule is validated with `visudo` and added only if missing;
-direct root and systemd runs do not grant access to another user.
+with no arguments or the specific `--disable-ban-sync` option. The rule is
+validated with `visudo` and added only if missing; direct root and systemd runs
+do not grant access to another user.
 
 The central service schedules OS, Hardware, and General history reports at
 15-minute, daily, and hourly intervals. Older agents continue heartbeat and
@@ -141,6 +142,22 @@ During migration, the installer removes only the legacy
 `inet xgs_monitor_agent` nftables table, and only after a successful Fail2ban
 policy sync. Existing UFW rules and defaults are not reset.
 
+To permanently disable ban synchronization on one host while keeping its
+Monitoring agent, run:
+
+```sh
+sudo /opt/xgs-monitoring-agent/update.sh --disable-ban-sync
+```
+
+The current updater release must be installed first; a regular updater run
+provisions the restricted sudoers rule for this option.
+
+This creates a host-local opt-out, backs up the managed policy and current
+firewall state under `/var/backups`, clears bans from the XGS jail, and removes
+the XGS sync units, jail, UFW profile, and legacy nftables table. It does not
+change UFW defaults or unrelated rules, uninstall Fail2ban, or enable the
+generic `sshd` jail. Future agent installs and updates preserve the opt-out.
+
 ## Update
 
 The updater is manual; the agent never updates itself. For the first update on
@@ -167,7 +184,8 @@ output shown only when a step fails.
 When UFW is active, the updater also checks the managed Fail2ban jail and sync
 timer. It installs or repairs them when they are missing or outdated, including
 disabling the generic `sshd` jail. If UFW is unavailable or inactive, it warns
-and continues without changing firewall policy.
+and continues without changing firewall policy. A host-local opt-out created
+with `--disable-ban-sync` takes precedence and is retained across updates.
 
 On an existing installation older than v0.3.2, run the first update with sudo,
 then run the newly installed updater once more with sudo to create the rule.

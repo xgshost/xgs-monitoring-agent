@@ -10,6 +10,11 @@ readonly SERVICE_NAME="xgs-monitor-agent-firewall-sync.service"
 readonly TIMER_NAME="xgs-monitor-agent-firewall-sync.timer"
 readonly FAIL2BAN_GROUP="xgs-monitor-agent-fail2ban"
 readonly UFW_PROFILE="XGSMonitorAgentSSH"
+readonly DISABLED_MARKER="/etc/xgs-monitor-agent-ban-sync.disabled"
+readonly FAIL2BAN_DROPIN="$UNIT_DIR/fail2ban.service.d/xgs-monitor-agent.conf"
+readonly JAIL_FILE="/etc/fail2ban/jail.d/xgs-monitor-agent.conf"
+readonly SSHD_OVERRIDE_FILE="/etc/fail2ban/jail.d/xgs-monitor-agent.local"
+readonly PROFILE_FILE="/etc/ufw/applications.d/xgs-monitor-agent"
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 
 fail() {
@@ -25,10 +30,156 @@ confirm() {
 
 managed_or_missing() {
   local file="$1"
+  [[ ! -L "$file" ]] || fail "$file is a symlink; refusing to manage it"
   if [[ -e "$file" ]] &&
     ! grep -Fqx '# Managed by XGS Monitoring Agent.' "$file"; then
     fail "$file exists and is not marked as managed by this installer"
   fi
+}
+
+remove_ban_sync() {
+  local backup_dir backup_path file status jail_list jail_status banned_text remaining_text
+  local marker_tmp nft_tables
+  local -a banned_ips=()
+  local artifacts=false
+  local nft_table_present=false
+
+  for file in \
+    "$DISABLED_MARKER" \
+    "$UNIT_DIR/$SERVICE_NAME" \
+    "$UNIT_DIR/$TIMER_NAME" \
+    "$FAIL2BAN_DROPIN" \
+    "$JAIL_FILE" \
+    "$SSHD_OVERRIDE_FILE" \
+    "$PROFILE_FILE"; do
+    managed_or_missing "$file"
+  done
+
+  for file in \
+    "$UNIT_DIR/$SERVICE_NAME" \
+    "$UNIT_DIR/$TIMER_NAME" \
+    "$FAIL2BAN_DROPIN" \
+    "$JAIL_FILE" \
+    "$PROFILE_FILE"; do
+    [[ ! -e "$file" ]] || artifacts=true
+  done
+
+  if command -v nft >/dev/null 2>&1; then
+    nft_tables="$(nft list tables)" ||
+      fail "Could not inspect nftables before removing the XGS policy"
+    if grep -Fxq 'table inet xgs_monitor_agent' <<<"$nft_tables"; then
+      nft_table_present=true
+      artifacts=true
+    fi
+  fi
+
+  if [[ -e "$DISABLED_MARKER" && "$artifacts" != true ]]; then
+    printf 'Host SSH autoban synchronization is already disabled and removed.\n'
+    return 0
+  fi
+
+  install -d -o root -g root -m 0700 /var/backups
+  backup_dir="$(mktemp -d /var/backups/xgs-monitor-agent-ban-sync.XXXXXX)" ||
+    fail "Could not create a protected backup directory"
+  chmod 0700 "$backup_dir"
+  for file in \
+    "$UNIT_DIR/$SERVICE_NAME" \
+    "$UNIT_DIR/$TIMER_NAME" \
+    "$FAIL2BAN_DROPIN" \
+    "$JAIL_FILE" \
+    "$SSHD_OVERRIDE_FILE" \
+    "$PROFILE_FILE" \
+    /etc/ufw/user.rules \
+    /etc/ufw/user6.rules; do
+    if [[ -e "$file" ]]; then
+      backup_path="$backup_dir/${file#/}"
+      install -d -o root -g root -m 0700 "${backup_path%/*}"
+      cp -a -- "$file" "$backup_path"
+    fi
+  done
+
+  if command -v ufw >/dev/null 2>&1; then
+    ufw status numbered >"$backup_dir/ufw-status.txt" 2>&1 ||
+      fail "Could not back up the current UFW rules"
+  fi
+  if command -v fail2ban-client >/dev/null 2>&1 &&
+    systemctl is-active --quiet fail2ban.service; then
+    fail2ban-client status >"$backup_dir/fail2ban-status.txt" 2>&1 ||
+      fail "Could not back up the active Fail2ban status"
+  fi
+  if [[ "$nft_table_present" == true ]]; then
+    nft list table inet xgs_monitor_agent >"$backup_dir/xgs_monitor_agent.nft" ||
+      fail "Could not back up the legacy XGS nftables table"
+  fi
+
+  if [[ ! -e "$DISABLED_MARKER" ]]; then
+    marker_tmp="$(mktemp /etc/.xgs-monitor-agent-ban-sync.disabled.XXXXXX)" ||
+      fail "Could not create the host opt-out marker"
+    printf '# Managed by XGS Monitoring Agent.\nDisabled at %s UTC.\n' \
+      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$marker_tmp"
+    chown root:root "$marker_tmp"
+    chmod 0644 "$marker_tmp"
+    mv -f -- "$marker_tmp" "$DISABLED_MARKER"
+  fi
+
+  if [[ -e "$UNIT_DIR/$TIMER_NAME" ]]; then
+    systemctl disable --now "$TIMER_NAME" ||
+      fail "Could not disable the XGS firewall-sync timer"
+  fi
+  if [[ -e "$UNIT_DIR/$SERVICE_NAME" ]]; then
+    systemctl stop "$SERVICE_NAME" ||
+      fail "Could not stop the XGS firewall-sync service"
+  fi
+
+  if [[ -e "$JAIL_FILE" || -e "$PROFILE_FILE" ]]; then
+    command -v fail2ban-client >/dev/null 2>&1 ||
+      fail "Fail2ban is unavailable; refusing to remove XGS firewall rules without unbanning them"
+    systemctl is-active --quiet fail2ban.service ||
+      fail "Fail2ban is not active; refusing to remove XGS firewall rules without inspecting the jail"
+    status="$(fail2ban-client status)" ||
+      fail "Could not inspect the active Fail2ban jails"
+    jail_list="$(sed -n 's/.*Jail list:[[:space:]]*//p' <<<"$status" | tr -d '[:space:]')"
+    [[ ",$jail_list," == *",xgs-monitor-agent,"* ]] ||
+      fail "The XGS jail is not active; refusing to remove its UFW rules without inspecting them"
+
+    jail_status="$(fail2ban-client status xgs-monitor-agent)" ||
+      fail "Could not inspect the active XGS jail bans"
+    printf '%s\n' "$jail_status" >"$backup_dir/xgs-monitor-agent-jail-status.txt"
+    banned_text="$(sed -n 's/.*Banned IP list:[[:space:]]*//p' <<<"$jail_status")"
+    if [[ -n "$banned_text" ]]; then
+      read -r -a banned_ips <<<"$banned_text"
+      local ip
+      for ip in "${banned_ips[@]}"; do
+        fail2ban-client set xgs-monitor-agent unbanip "$ip" >/dev/null ||
+          fail "Could not clear an active XGS jail ban"
+      done
+    fi
+
+    jail_status="$(fail2ban-client status xgs-monitor-agent)" ||
+      fail "Could not verify that XGS jail bans were cleared"
+    remaining_text="$(sed -n 's/.*Banned IP list:[[:space:]]*//p' <<<"$jail_status")"
+    [[ -z "$remaining_text" ]] ||
+      fail "XGS jail bans remain active; refusing to remove the jail configuration"
+    fail2ban-client stop xgs-monitor-agent >/dev/null ||
+      fail "Could not stop the XGS Fail2ban jail"
+  fi
+
+  if [[ "$nft_table_present" == true ]]; then
+    nft delete table inet xgs_monitor_agent ||
+      fail "Could not remove the legacy XGS nftables table"
+  fi
+
+  rm -f -- \
+    "$UNIT_DIR/$SERVICE_NAME" \
+    "$UNIT_DIR/$TIMER_NAME" \
+    "$FAIL2BAN_DROPIN" \
+    "$JAIL_FILE" \
+    "$PROFILE_FILE"
+  systemctl daemon-reload
+
+  printf 'Host SSH autoban synchronization and active XGS bans were removed.\n'
+  printf 'UFW defaults and unrelated rules were left unchanged; the generic sshd jail remains disabled.\n'
+  printf 'Protected pre-removal backup: %s\n' "$backup_dir"
 }
 
 configured_ssh_ports() {
@@ -90,11 +241,12 @@ verify_fail2ban_jails() {
 
 if [[ "${1:-}" == "--help" ]]; then
   cat <<'HELP'
-Install or migrate XGS SSH autoban enforcement to Fail2ban with UFW.
+Install, migrate, or remove XGS SSH autoban enforcement via Fail2ban and UFW.
 
 Run after the monitoring agent has been built and enrolled:
   sudo ./install-ban-sync.sh
   sudo ./install-ban-sync.sh --yes
+  sudo ./update.sh --disable-ban-sync
 
 This installs Fail2ban if needed, enables the XGS Monitoring SSH jail, disables
 the generic sshd jail, configures a UFW SSH application profile, and replaces
@@ -102,12 +254,19 @@ the prior nftables policy synchronizer.
 The legacy XGS nftables table is removed only after the Fail2ban policy sync
 succeeds. Central Discord autoban thresholds and allowlists remain unchanged.
 Use --yes only after reviewing and accepting this installation plan.
+The update.sh --disable-ban-sync option creates a persistent host opt-out,
+backs up the managed configuration, clears active XGS jail bans, and removes
+only the XGS sync units, jail, UFW profile, and legacy nftables table.
 HELP
   exit 0
 fi
 
 assume_yes=false
-if [[ "${1:-}" == "--yes" ]]; then
+remove_mode=false
+if [[ "${1:-}" == "--remove" ]]; then
+  remove_mode=true
+  shift
+elif [[ "${1:-}" == "--yes" ]]; then
   assume_yes=true
   shift
 fi
@@ -115,6 +274,14 @@ fi
 [[ "$EUID" -eq 0 ]] || fail "Run with sudo: sudo ./install-ban-sync.sh"
 [[ "$SCRIPT_DIR" == "$INSTALL_DIR" ]] ||
   fail "Run this script from $INSTALL_DIR"
+if [[ "$remove_mode" == true ]]; then
+  remove_ban_sync
+  exit 0
+fi
+if [[ -e "$DISABLED_MARKER" ]]; then
+  managed_or_missing "$DISABLED_MARKER"
+  fail "Host SSH autoban synchronization is disabled; use sudo ./update.sh --disable-ban-sync to retain the opt-out"
+fi
 [[ -f "$INSTALL_DIR/dist/firewall-sync.js" ]] ||
   fail "Build the agent before installing the ban synchronizer"
 [[ -f "$ENV_FILE" && -f "$STATE_FILE" ]] ||
@@ -136,10 +303,6 @@ if [[ -e "$UNIT_DIR/$TIMER_NAME" ]] &&
   managed_or_missing "$UNIT_DIR/$TIMER_NAME"
 fi
 
-readonly FAIL2BAN_DROPIN="$UNIT_DIR/fail2ban.service.d/xgs-monitor-agent.conf"
-readonly JAIL_FILE="/etc/fail2ban/jail.d/xgs-monitor-agent.conf"
-readonly SSHD_OVERRIDE_FILE="/etc/fail2ban/jail.d/xgs-monitor-agent.local"
-readonly PROFILE_FILE="/etc/ufw/applications.d/xgs-monitor-agent"
 managed_or_missing "$FAIL2BAN_DROPIN"
 managed_or_missing "$JAIL_FILE"
 managed_or_missing "$SSHD_OVERRIDE_FILE"

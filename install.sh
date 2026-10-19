@@ -5,6 +5,7 @@ umask 077
 readonly INSTALL_DIR="/opt/xgs-monitoring-agent"
 readonly SERVICE_USER="xgs-monitor-agent"
 readonly ENV_FILE="/etc/xgs-monitor-agent.env"
+readonly BAN_SYNC_DISABLED_MARKER="/etc/xgs-monitor-agent-ban-sync.disabled"
 readonly UNIT_FILE="/etc/systemd/system/xgs-monitor-agent.service"
 readonly UNIT_DROPIN_DIR="/etc/systemd/system/xgs-monitor-agent.service.d"
 readonly STATE_FILE="/var/lib/xgs-monitor-agent/credentials.json"
@@ -55,6 +56,11 @@ confirm() {
 }
 
 install_ban_sync_if_ufw_active() {
+  if [[ -e "$BAN_SYNC_DISABLED_MARKER" ]]; then
+    printf 'SSH autoban synchronization is disabled by this host; leaving it disabled.\n'
+    return 0
+  fi
+
   if ! command -v ufw >/dev/null 2>&1; then
     printf 'Warning: UFW is not installed; SSH autoban synchronization was not enabled.\n' >&2
     printf 'After configuring UFW, run: cd /opt/xgs-monitoring-agent && sudo ./install-ban-sync.sh\n' >&2

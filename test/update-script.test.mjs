@@ -16,6 +16,9 @@ test("updater is executable, syntactically valid, and checks before restarting",
 
   const source = readFileSync(updaterPath, "utf8");
   assert.match(source, /--rebuild-current/);
+  assert.match(source, /--disable-ban-sync/);
+  assert.match(source, /xgs-monitor-agent-ban-sync\.disabled/);
+  assert.match(source, /install-ban-sync\.sh" --remove/);
   assert.match(source, /git -C "\$REPOSITORY_DIR" fetch origin main/);
   assert.match(source, /git -C "\$REPOSITORY_DIR" merge --ff-only/);
   assert.match(source, /xgs-monitor-agent-successful-update/);
