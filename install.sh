@@ -54,6 +54,28 @@ confirm() {
   [[ "$answer" =~ ^[Yy]([Ee][Ss])?$ ]]
 }
 
+install_ban_sync_if_ufw_active() {
+  if ! command -v ufw >/dev/null 2>&1; then
+    printf 'Warning: UFW is not installed; SSH autoban synchronization was not enabled.\n' >&2
+    printf 'After configuring UFW, run: cd /opt/xgs-monitoring-agent && sudo ./install-ban-sync.sh\n' >&2
+    return 0
+  fi
+
+  local ufw_status
+  if ! ufw_status="$(ufw status 2>&1)"; then
+    printf 'Warning: could not check UFW status; SSH autoban synchronization was not enabled.\n' >&2
+    return 0
+  fi
+  if ! grep -qx 'Status: active' <<<"$ufw_status"; then
+    printf 'Warning: UFW is not active; SSH autoban synchronization was not enabled.\n' >&2
+    printf 'After configuring UFW, run: cd /opt/xgs-monitoring-agent && sudo ./install-ban-sync.sh\n' >&2
+    return 0
+  fi
+
+  printf 'UFW is active; enabling SSH autoban synchronization with Fail2ban.\n'
+  "$INSTALL_DIR/install-ban-sync.sh" --yes
+}
+
 if [[ "${1:-}" == "--help" ]]; then
   print_banner "installer"
   cat <<'HELP'
@@ -65,6 +87,9 @@ Run from /opt/xgs-monitoring-agent:
 
 The installer requires an interactive terminal to collect the service URL,
 one-use enrollment token, and explicit journal-read permission consent.
+On a fresh install, it also enables SSH autoban synchronization when UFW is
+already active. It does not install or enable UFW; if UFW is unavailable or
+inactive, the agent installs normally and reports that synchronization is off.
 When run through sudo, it grants the invoking user passwordless access to the
 agent updater only.
 The Docker-watch option requires an existing installation and restarts its
@@ -152,6 +177,8 @@ printf 'Install plan:\n'
 printf '  - Install Node.js 22, then build and test the agent.\n'
 printf '  - Create an unprivileged service account and store enrollment settings.\n'
 printf '  - Enable the service; the agent will not execute remote commands.\n'
+printf '  - If UFW is active, install Fail2ban SSH autoban enforcement and enable its policy timer.\n'
+printf '  - If UFW is missing or inactive, continue without firewall synchronization and show a warning.\n'
 printf '  - If run through sudo, allow the caller to run only the agent updater without a password.\n'
 confirm "Continue with the installation?" || fail "Cancelled"
 
@@ -345,5 +372,6 @@ else
   exit 1
 fi
 
+install_ban_sync_if_ufw_active
 printf 'Installation complete; the agent is enrolled and active.\n'
 ensure_update_sudoers_rule

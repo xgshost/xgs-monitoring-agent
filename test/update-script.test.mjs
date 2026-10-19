@@ -31,6 +31,14 @@ test("updater is executable, syntactically valid, and checks before restarting",
   );
   assert.match(source, /run_step\(\)/);
   assert.match(source, /cat "\$output_log" >&2/);
+  assert.match(source, /update_ban_sync_if_ufw_active\(\)/);
+  assert.match(source, /"\$REPOSITORY_DIR\/install-ban-sync\.sh" --yes/);
+  assert.match(source, /ufw status 2>&1/);
+  assert.match(source, /Status: active/);
+  const banSyncCall = source.indexOf("\nupdate_ban_sync_if_ufw_active\n");
+  const serviceRestart = source.indexOf('run_step "Restarting service"');
+  assert.ok(banSyncCall > source.indexOf('run_step "Preparing production files"'));
+  assert.ok(banSyncCall < serviceRestart);
   assert.ok(
     source.indexOf("npm test") <
       source.indexOf('systemctl restart "$SERVICE_NAME"'),

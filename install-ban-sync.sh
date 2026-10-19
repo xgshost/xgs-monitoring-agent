@@ -77,21 +77,40 @@ install_fail2ban_if_missing() {
     fail "Fail2ban installation completed but fail2ban-client is unavailable"
 }
 
+verify_fail2ban_jails() {
+  local status jail_list
+  status="$(fail2ban-client status)" ||
+    fail "Could not inspect the active Fail2ban jails"
+  jail_list="$(sed -n 's/.*Jail list:[[:space:]]*//p' <<<"$status" | tr -d '[:space:]')"
+  [[ ",$jail_list," == *",xgs-monitor-agent,"* ]] ||
+    fail "The XGS Monitoring SSH jail is not active"
+  [[ ",$jail_list," != *",sshd,"* ]] ||
+    fail "The default sshd jail is still active; check for a conflicting Fail2ban override"
+}
+
 if [[ "${1:-}" == "--help" ]]; then
   cat <<'HELP'
 Install or migrate XGS SSH autoban enforcement to Fail2ban with UFW.
 
 Run after the monitoring agent has been built and enrolled:
   sudo ./install-ban-sync.sh
+  sudo ./install-ban-sync.sh --yes
 
-This installs Fail2ban if needed, configures a dedicated jail and UFW SSH
-application profile, and replaces the prior nftables policy synchronizer.
+This installs Fail2ban if needed, enables the XGS Monitoring SSH jail, disables
+the generic sshd jail, configures a UFW SSH application profile, and replaces
+the prior nftables policy synchronizer.
 The legacy XGS nftables table is removed only after the Fail2ban policy sync
 succeeds. Central Discord autoban thresholds and allowlists remain unchanged.
+Use --yes only after reviewing and accepting this installation plan.
 HELP
   exit 0
 fi
 
+assume_yes=false
+if [[ "${1:-}" == "--yes" ]]; then
+  assume_yes=true
+  shift
+fi
 [[ "$#" -eq 0 ]] || fail "Unknown option: $1"
 [[ "$EUID" -eq 0 ]] || fail "Run with sudo: sudo ./install-ban-sync.sh"
 [[ "$SCRIPT_DIR" == "$INSTALL_DIR" ]] ||
@@ -119,18 +138,25 @@ fi
 
 readonly FAIL2BAN_DROPIN="$UNIT_DIR/fail2ban.service.d/xgs-monitor-agent.conf"
 readonly JAIL_FILE="/etc/fail2ban/jail.d/xgs-monitor-agent.conf"
+readonly SSHD_OVERRIDE_FILE="/etc/fail2ban/jail.d/xgs-monitor-agent.local"
 readonly PROFILE_FILE="/etc/ufw/applications.d/xgs-monitor-agent"
 managed_or_missing "$FAIL2BAN_DROPIN"
 managed_or_missing "$JAIL_FILE"
+managed_or_missing "$SSHD_OVERRIDE_FILE"
 managed_or_missing "$PROFILE_FILE"
 
 ports="$(configured_ssh_ports)"
 printf 'This will install/configure Fail2ban and a UFW application profile for TCP ports %s.\n' "$ports"
+printf 'It will enable the XGS Monitoring SSH jail and disable the generic sshd jail.\n'
 printf 'It will replace the XGS sync service, add the agent account to the Fail2ban control socket group,\n'
 printf 'and remove only the legacy inet xgs_monitor_agent table after a successful central-policy sync.\n'
 printf 'It will not enable UFW or change its default policy.\n'
-confirm "Migrate SSH autoban enforcement to Fail2ban via UFW?" ||
-  fail "Cancelled without changing the host"
+if [[ "$assume_yes" == true ]]; then
+  printf 'Continuing with confirmation from the main agent installer.\n'
+else
+  confirm "Migrate SSH autoban enforcement to Fail2ban via UFW?" ||
+    fail "Cancelled without changing the host"
+fi
 
 install_fail2ban_if_missing
 command -v groupadd >/dev/null || fail "groupadd is required"
@@ -143,6 +169,8 @@ install -d -o root -g root -m 0755 \
   /etc/ufw/applications.d
 install -o root -g root -m 0644 \
   "$SCRIPT_DIR/deploy/fail2ban/jail.d/xgs-monitor-agent.conf" "$JAIL_FILE"
+install -o root -g root -m 0644 \
+  "$SCRIPT_DIR/deploy/fail2ban/jail.d/xgs-monitor-agent.local" "$SSHD_OVERRIDE_FILE"
 
 profile_tmp="$(mktemp)"
 trap 'rm -f "$profile_tmp"' EXIT
@@ -180,6 +208,7 @@ systemctl enable --now fail2ban.service
 systemctl restart fail2ban.service
 systemctl is-active --quiet fail2ban.service ||
   fail "Fail2ban did not become active"
+verify_fail2ban_jails
 
 systemctl start "$SERVICE_NAME" ||
   fail "Fail2ban did not apply the central policy; the legacy nftables table was left untouched"

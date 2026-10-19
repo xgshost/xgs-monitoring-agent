@@ -14,6 +14,12 @@ const banServicePath = fileURLToPath(
     import.meta.url,
   ),
 );
+const customJailPath = fileURLToPath(
+  new URL("../deploy/fail2ban/jail.d/xgs-monitor-agent.conf", import.meta.url),
+);
+const defaultSshJailOverridePath = fileURLToPath(
+  new URL("../deploy/fail2ban/jail.d/xgs-monitor-agent.local", import.meta.url),
+);
 
 test("agent installer is executable, syntactically valid, and documents usage", () => {
   assert.doesNotThrow(() => accessSync(installerPath, constants.X_OK));
@@ -24,6 +30,11 @@ test("agent installer is executable, syntactically valid, and documents usage", 
   assert.match(installerSource, /X   X   GGGGG   SSSSS/);
   assert.match(installerSource, /source "\$SCRIPT_DIR\/update-sudoers\.sh"/);
   assert.match(installerSource, /ensure_update_sudoers_rule/);
+  assert.match(installerSource, /install_ban_sync_if_ufw_active/);
+  assert.match(installerSource, /command -v ufw/);
+  assert.match(installerSource, /Status: active/);
+  assert.match(installerSource, /SSH autoban synchronization was not enabled/);
+  assert.match(installerSource, /install-ban-sync\.sh" --yes/);
   assert.match(installerSource, /^  update-sudoers\.sh \\$/m);
   assert.match(installerSource, /^  update\.sh \\$/m);
   assert.match(installerSource, /^  auto-update\.sh \\$/m);
@@ -47,6 +58,7 @@ test("agent installer is executable, syntactically valid, and documents usage", 
   assert.match(help.stdout, /XGS Monitoring Agent installer/);
   assert.match(help.stdout, /--enable-docker-watch/);
   assert.match(help.stdout, /one-use enrollment token/);
+  assert.match(help.stdout, /enables SSH autoban synchronization when UFW is/);
 });
 
 test("agent installer reports unhandled failures with line and exit status", () => {
@@ -80,6 +92,8 @@ test("agent installer reports unhandled failures with line and exit status", () 
 test("ban installer migrates to Fail2ban/UFW with explicit confirmation", () => {
   assert.doesNotThrow(() => accessSync(banInstallerPath, constants.X_OK));
   const source = readFileSync(banInstallerPath, "utf8");
+  const customJail = readFileSync(customJailPath, "utf8");
+  const defaultSshJailOverride = readFileSync(defaultSshJailOverridePath, "utf8");
   assert.match(
     source,
     /apt-get install -y --no-install-recommends fail2ban/,
@@ -90,13 +104,22 @@ test("ban installer migrates to Fail2ban/UFW with explicit confirmation", () => 
   );
   assert.match(source, /ufw app info "\$UFW_PROFILE"/);
   assert.match(source, /systemctl start "\$SERVICE_NAME"/);
+  assert.match(source, /verify_fail2ban_jails/);
+  assert.match(source, /xgs-monitor-agent\.local/);
   assert.match(source, /nft delete table inet xgs_monitor_agent/);
+  assert.match(customJail, /^\[xgs-monitor-agent\]$/m);
+  assert.match(customJail, /^enabled = true$/m);
+  assert.match(customJail, /^filter = sshd$/m);
+  assert.match(defaultSshJailOverride, /^\[sshd\]$/m);
+  assert.match(defaultSshJailOverride, /^enabled = false$/m);
   assert.ok(
     source.indexOf('systemctl start "$SERVICE_NAME"') <
       source.indexOf("nft delete table inet xgs_monitor_agent"),
   );
   assert.doesNotMatch(source, /systemctl (?:enable|start) ufw\.service/);
   assert.doesNotMatch(source, /apt-get install[^'\n]*nftables/);
+  assert.match(source, /assume_yes=true/);
+  assert.match(source, /Continuing with confirmation from the main agent installer/);
 
   const syntaxCheck = spawnSync("bash", ["-n", banInstallerPath], {
     encoding: "utf8",
@@ -106,6 +129,7 @@ test("ban installer migrates to Fail2ban/UFW with explicit confirmation", () => 
   const help = spawnSync(banInstallerPath, ["--help"], { encoding: "utf8" });
   assert.equal(help.status, 0, help.stderr);
   assert.match(help.stdout, /sudo \.\/install-ban-sync\.sh/);
+  assert.match(help.stdout, /sudo \.\/install-ban-sync\.sh --yes/);
   assert.match(help.stdout, /Central Discord autoban thresholds and allowlists remain unchanged/);
 });
 

@@ -4,6 +4,9 @@ set -Eeuo pipefail
 readonly REPOSITORY_DIR="/opt/xgs-monitoring-agent"
 readonly SERVICE_NAME="xgs-monitor-agent"
 readonly SUCCESS_MARKER="${REPOSITORY_DIR}/.git/xgs-monitor-agent-successful-update"
+readonly BAN_SYNC_TIMER="xgs-monitor-agent-firewall-sync.timer"
+readonly BAN_JAIL_CONFIG="/etc/fail2ban/jail.d/xgs-monitor-agent.conf"
+readonly DEFAULT_SSH_JAIL_OVERRIDE="/etc/fail2ban/jail.d/xgs-monitor-agent.local"
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 source "$SCRIPT_DIR/update-sudoers.sh"
 
@@ -89,6 +92,37 @@ run_step() {
   fi
 }
 
+update_ban_sync_if_ufw_active() {
+  if ! command -v ufw >/dev/null 2>&1; then
+    printf 'Warning: UFW is not installed; Fail2ban SSH setup was skipped during update.\n' >&2
+    return 0
+  fi
+
+  local ufw_status
+  if ! ufw_status="$(ufw status 2>&1)"; then
+    printf 'Warning: could not check UFW status; Fail2ban SSH setup was skipped during update.\n' >&2
+    return 0
+  fi
+  if ! grep -qx 'Status: active' <<<"$ufw_status"; then
+    printf 'Warning: UFW is not active; Fail2ban SSH setup was skipped during update.\n' >&2
+    return 0
+  fi
+
+  local jail_source="$REPOSITORY_DIR/deploy/fail2ban/jail.d/xgs-monitor-agent.conf"
+  local sshd_override_source="$REPOSITORY_DIR/deploy/fail2ban/jail.d/xgs-monitor-agent.local"
+  if [[ -f "$BAN_JAIL_CONFIG" && -f "$DEFAULT_SSH_JAIL_OVERRIDE" ]] &&
+    cmp -s "$jail_source" "$BAN_JAIL_CONFIG" &&
+    cmp -s "$sshd_override_source" "$DEFAULT_SSH_JAIL_OVERRIDE" &&
+    systemctl is-active --quiet fail2ban.service &&
+    systemctl is-active --quiet "$BAN_SYNC_TIMER"; then
+    printf 'Fail2ban SSH jail and policy sync are current.\n'
+    return 0
+  fi
+
+  run_step "Updating Fail2ban SSH policy" \
+    "$REPOSITORY_DIR/install-ban-sync.sh" --yes
+}
+
 run_step "Checking for updates" git -C "$REPOSITORY_DIR" fetch origin main
 current_commit="$(git -C "$REPOSITORY_DIR" rev-parse HEAD)"
 available_commit="$(git -C "$REPOSITORY_DIR" rev-parse FETCH_HEAD)"
@@ -118,6 +152,8 @@ run_step "Applying update" git -C "$REPOSITORY_DIR" merge --ff-only "$available_
   run_step "Running tests" npm test
   run_step "Preparing production files" npm prune --omit=dev
 )
+
+update_ban_sync_if_ufw_active
 
 run_step "Restarting service" systemctl restart "$SERVICE_NAME"
 if ! systemctl is-active --quiet "$SERVICE_NAME"; then

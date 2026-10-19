@@ -102,21 +102,30 @@ The central service schedules OS, Hardware, and General history reports at
 SSH reporting, but do not report sudo failures or provide telemetry until
 manually updated.
 
-## Optional SSH autoban enforcement
+## SSH autoban enforcement
 
-After the agent is installed, built, and enrolled, install the Fail2ban/UFW
-policy synchronizer on each host:
+On a fresh agent install, the installer enables the Fail2ban/UFW policy
+synchronizer when UFW is already active. If UFW is missing or inactive, the
+agent installation continues with a warning and leaves firewall
+synchronization disabled; the installer never installs or enables UFW.
+After configuring UFW, enable synchronization manually:
 
 ```sh
+cd /opt/xgs-monitoring-agent
 sudo ./install-ban-sync.sh
 ```
 
-The installer offers to install Fail2ban through APT on Debian and Ubuntu when
-it is missing. It requires UFW to already be active, creates a dedicated UFW
-application profile for the configured SSH ports, and uses Fail2ban's UFW
-action to enforce centrally managed bans. It does not enable UFW or change its
-default policy. The existing global threshold, escalation, Discord controls,
-and allowlist remain in the central service.
+The synchronizer installer offers to install Fail2ban through APT on Debian
+and Ubuntu when it is missing. It requires UFW to already be active, creates a
+dedicated UFW application profile for the configured SSH ports, enables the
+`xgs-monitor-agent` SSH jail, disables the generic `sshd` jail to avoid
+duplicate SSH enforcement, and uses Fail2ban's UFW action for centrally
+managed bans. It verifies the custom jail is active and the generic jail is
+not. It does not enable UFW or change its default policy; firewall hardening is
+reviewed and applied per host. The separate default-deny/IPv6-blocking rollout
+is limited to monitored hosts with a public IP and requires service-port review.
+The existing global threshold, escalation, Discord controls, and allowlist
+remain in the central service.
 
 The central policy synchronizer runs as `xgs-monitor-agent` without
 `CAP_NET_ADMIN`. A dedicated group grants it access to Fail2ban's local control
@@ -154,6 +163,11 @@ local changes. When invoked through sudo, it adds the validated, no-argument
 updater rule for that invoking user if missing. The agent has no remote shell
 or server-control feature. It prints concise progress, with detailed command
 output shown only when a step fails.
+
+When UFW is active, the updater also checks the managed Fail2ban jail and sync
+timer. It installs or repairs them when they are missing or outdated, including
+disabling the generic `sshd` jail. If UFW is unavailable or inactive, it warns
+and continues without changing firewall policy.
 
 On an existing installation older than v0.3.2, run the first update with sudo,
 then run the newly installed updater once more with sudo to create the rule.

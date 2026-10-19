@@ -1,0 +1,3 @@
+# Managed by XGS Monitoring Agent.
+[sshd]
+enabled = false
