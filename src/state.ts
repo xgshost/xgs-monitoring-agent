@@ -15,6 +15,7 @@ export interface AgentState {
   agentToken: string;
   enrollmentToken?: string;
   enrollmentAccepted: boolean;
+  debugEnabled?: boolean;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

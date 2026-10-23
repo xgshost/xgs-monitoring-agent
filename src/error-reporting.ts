@@ -18,6 +18,8 @@ export const AGENT_ERROR_OPERATIONS = [
   "sudo_event_upload",
   "journal_reader",
   "docker_watch_upload",
+  "debug_event_upload",
+  "ssh_autoban_sync",
   "agent_startup",
 ] as const;
 
@@ -31,8 +33,6 @@ export interface AgentErrorReport {
 
 export const MAX_AGENT_ERROR_LOG_BYTES = 1_048_576;
 
-const ERROR_REPORT_INTERVAL_MS = 60_000;
-const lastForwardedAt = new Map<string, number>();
 const errorCodePattern = /^[A-Za-z0-9_.-]{1,64}$/;
 
 export function getAgentErrorCode(error: unknown): string {
@@ -124,19 +124,6 @@ export async function reportAgentError(
   if (!state.enrollmentAccepted) {
     return;
   }
-
-  const now = report.occurredAtMs;
-  const key = `${report.operation}:${report.errorCode}`;
-  for (const [existingKey, forwardedAt] of lastForwardedAt) {
-    if (now - forwardedAt >= ERROR_REPORT_INTERVAL_MS) {
-      lastForwardedAt.delete(existingKey);
-    }
-  }
-  const lastSentAt = lastForwardedAt.get(key);
-  if (lastSentAt !== undefined && now - lastSentAt < ERROR_REPORT_INTERVAL_MS) {
-    return;
-  }
-  lastForwardedAt.set(key, now);
 
   try {
     const response = await request(

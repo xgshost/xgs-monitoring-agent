@@ -122,6 +122,18 @@ test("validates policy entries and rejects invalid or duplicate addresses", () =
     ).bans,
     [{ sourceIp: "192.0.2.10", expiresAtMs: now + 30 * 86_400_000 }],
   );
+  assert.deepEqual(
+    validateSshBanPolicy(
+      {
+        status: "ok",
+        enabled: false,
+        revision: 5,
+        bans: [{ sourceIp: "192.0.2.11", expiresAtMs: null }],
+      },
+      now,
+    ).bans,
+    [{ sourceIp: "192.0.2.11", expiresAtMs: null }],
+  );
 });
 
 test("parses Fail2ban's empty and populated ban lists", () => {
@@ -194,27 +206,27 @@ test("adds policy bans absent from the dedicated Fail2ban jail", () => {
   ]);
 });
 
-test("clears the dedicated jail when central autobans are disabled", () => {
+test("keeps explicit permanent bans when automatic autobans are disabled", () => {
   const calls = [];
   assert.equal(
     syncFail2banPolicy(
       {
         enabled: false,
         revision: 6,
-        bans: [{ sourceIp: "192.0.2.10", expiresAtMs: now + 60_000 }],
+        bans: [{ sourceIp: "192.0.2.10", expiresAtMs: null }],
       },
       [22],
       now,
       (args) => {
         calls.push(args);
-        return "192.0.2.10";
+        return "";
       },
     ),
-    0,
+    1,
   );
   assert.deepEqual(calls, [
     ["get", "xgs-monitor-agent", "banip", ","],
-    ["set", "xgs-monitor-agent", "unbanip", "192.0.2.10"],
+    ["set", "xgs-monitor-agent", "banip", "192.0.2.10"],
   ]);
 });
 

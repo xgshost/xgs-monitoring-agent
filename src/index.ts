@@ -8,6 +8,12 @@ import {
   type AgentErrorOperation,
 } from "./error-reporting.js";
 import {
+  reportAgentDebug,
+  summarizeAgentMetrics,
+  type AgentDebugMetricsSummary,
+  type AgentDebugOperation,
+} from "./debug-reporting.js";
+import {
   loadAgentState,
   markAgentEnrolled,
   type AgentState,
@@ -31,6 +37,16 @@ class ReceiverResponseError extends Error {
   }
 }
 
+function readDebugMode(value: unknown): boolean {
+  if (!isObject(value)) {
+    throw new Error("Receiver returned an invalid heartbeat response");
+  }
+  if (value.debugEnabled !== undefined && typeof value.debugEnabled !== "boolean") {
+    throw new Error("Receiver returned an invalid debug mode");
+  }
+  return value.debugEnabled === true;
+}
+
 function isPermanentClientError(error: unknown): boolean {
   return (
     error instanceof ReceiverResponseError &&
@@ -38,6 +54,22 @@ function isPermanentClientError(error: unknown): boolean {
     error.statusCode < 500 &&
     error.statusCode !== 408 &&
     error.statusCode !== 429
+  );
+}
+
+async function recordDebug(
+  state: AgentState,
+  config: ReturnType<typeof loadAgentConfig>,
+  operation: AgentDebugOperation,
+  metrics?: AgentDebugMetricsSummary,
+): Promise<void> {
+  await reportAgentDebug(
+    join(dirname(config.stateFilePath), "errors.jsonl"),
+    config.monitorBaseUrl,
+    state,
+    operation,
+    undefined,
+    metrics,
   );
 }
 
@@ -113,7 +145,11 @@ process.once("SIGTERM", stop);
 async function redeemEnrollment(
   state: AgentState,
   config: ReturnType<typeof loadAgentConfig>,
-): Promise<{ state: AgentState; heartbeatIntervalSeconds: number }> {
+): Promise<{
+  state: AgentState;
+  heartbeatIntervalSeconds: number;
+  debugEnabled: boolean;
+}> {
   if (!state.enrollmentToken) {
     throw new Error("Pending agent state has no enrollment token");
   }
@@ -140,16 +176,23 @@ async function redeemEnrollment(
     throw new Error("Receiver returned an invalid enrollment response");
   }
 
+  const enrolledState = markAgentEnrolled(config.stateFilePath, state);
+  enrolledState.debugEnabled = readDebugMode(responseBody);
   return {
-    state: markAgentEnrolled(config.stateFilePath, state),
+    state: enrolledState,
     heartbeatIntervalSeconds: readHeartbeatInterval(responseBody),
+    debugEnabled: enrolledState.debugEnabled,
   };
 }
 
 async function redeemWithRetry(
   initialState: AgentState,
   config: ReturnType<typeof loadAgentConfig>,
-): Promise<{ state: AgentState; heartbeatIntervalSeconds: number } | undefined> {
+): Promise<{
+  state: AgentState;
+  heartbeatIntervalSeconds: number;
+  debugEnabled: boolean;
+} | undefined> {
   let retryDelay = 1_000;
 
   while (!stopping) {
@@ -192,7 +235,7 @@ async function redeemWithRetry(
 async function sendHeartbeat(
   state: AgentState,
   config: ReturnType<typeof loadAgentConfig>,
-): Promise<number> {
+): Promise<{ heartbeatIntervalSeconds: number; debugEnabled: boolean }> {
   const response = await fetch(
     `${config.monitorBaseUrl}/api/v1/agents/heartbeat`,
     {
@@ -206,7 +249,11 @@ async function sendHeartbeat(
     throw new ReceiverResponseError(response.status);
   }
 
-  return readHeartbeatInterval(await response.json());
+  const responseBody: unknown = await response.json();
+  return {
+    heartbeatIntervalSeconds: readHeartbeatInterval(responseBody),
+    debugEnabled: readDebugMode(responseBody),
+  };
 }
 
 async function sendSshEvent(
@@ -258,7 +305,10 @@ async function sendSudoAuthFailureEvent(
 async function sendMetrics(
   state: AgentState,
   config: ReturnType<typeof loadAgentConfig>,
-): Promise<number> {
+): Promise<{
+  heartbeatIntervalSeconds: number;
+  debugMetrics: AgentDebugMetricsSummary;
+}> {
   const metrics = await collectAgentMetrics(config.serviceUnits);
   const response = await fetch(
     `${config.monitorBaseUrl}/api/v1/agents/metrics`,
@@ -277,7 +327,12 @@ async function sendMetrics(
     throw new ReceiverResponseError(response.status);
   }
 
-  return readHeartbeatInterval(await response.json());
+  return {
+    heartbeatIntervalSeconds: readHeartbeatInterval(
+      await response.json(),
+    ),
+    debugMetrics: summarizeAgentMetrics(metrics),
+  };
 }
 
 interface DockerWatchPolicyPage {
@@ -453,10 +508,13 @@ async function runDockerWatch(
   while (!stopping) {
     try {
       const names = await fetchDockerWatchPolicy(state, config);
+      await recordDebug(state, config, "docker_watch_policy_fetch");
       const report = await collectDockerContainerSnapshots(names);
       await sendDockerWatchReport(state, config, report);
+      await recordDebug(state, config, "docker_watch_status_upload");
       const inventory = await collectDockerContainerNames();
       await sendDockerContainerInventory(state, config, inventory);
+      await recordDebug(state, config, "docker_watch_inventory_upload");
       retryDelay = intervalSeconds * 1000;
       await wait(retryDelay);
     } catch (error) {
@@ -486,7 +544,14 @@ async function runMetrics(
 
   while (!stopping) {
     try {
-      intervalSeconds = await sendMetrics(state, config);
+      const upload = await sendMetrics(state, config);
+      intervalSeconds = upload.heartbeatIntervalSeconds;
+      await recordDebug(
+        state,
+        config,
+        "metrics_upload",
+        upload.debugMetrics,
+      );
       retryDelay = intervalSeconds * 1000;
       await wait(retryDelay);
     } catch (error) {
@@ -527,6 +592,7 @@ async function sendSshEventWithRetry(
   while (!stopping) {
     try {
       await sendSshEvent(event, state, config);
+      await recordDebug(state, config, "ssh_event_upload");
       return;
     } catch (error) {
       if (isPermanentClientError(error)) {
@@ -560,6 +626,7 @@ async function sendSudoAuthFailureWithRetry(
   while (!stopping) {
     try {
       await sendSudoAuthFailureEvent(event, state, config);
+      await recordDebug(state, config, "sudo_event_upload");
       return;
     } catch (error) {
       if (isPermanentClientError(error)) {
@@ -631,6 +698,7 @@ async function followAuthenticationJournal(
   }
 
   const lines = createInterface({ input: child.stdout });
+  await recordDebug(state, config, "journal_reader_started");
   try {
     for await (const line of lines) {
       if (stopping) {
@@ -705,7 +773,10 @@ async function runHeartbeats(
 
   while (!stopping) {
     try {
-      heartbeatIntervalSeconds = await sendHeartbeat(state, config);
+      const heartbeat = await sendHeartbeat(state, config);
+      heartbeatIntervalSeconds = heartbeat.heartbeatIntervalSeconds;
+      state.debugEnabled = heartbeat.debugEnabled;
+      await recordDebug(state, config, "heartbeat_upload");
       retryDelay = heartbeatIntervalSeconds * 1000;
       await wait(retryDelay);
     } catch (error) {
@@ -744,6 +815,7 @@ async function main(): Promise<void> {
   const config = loadAgentConfig(process.env);
   let state = loadAgentState(config.stateFilePath, config.enrollmentToken);
   let heartbeatIntervalSeconds = config.heartbeatIntervalSeconds;
+  let debugEnabled = false;
 
   if (!state.enrollmentAccepted) {
     const redemption = await redeemWithRetry(state, config);
@@ -752,8 +824,13 @@ async function main(): Promise<void> {
     }
     state = redemption.state;
     heartbeatIntervalSeconds = redemption.heartbeatIntervalSeconds;
+    debugEnabled = redemption.debugEnabled;
     console.info("Agent enrollment completed");
+    await recordDebug(state, config, "agent_enrollment_completed");
+  } else {
+    debugEnabled = state.debugEnabled === true;
   }
+  state.debugEnabled = debugEnabled;
 
   console.info("Agent heartbeat service started");
   await Promise.all([

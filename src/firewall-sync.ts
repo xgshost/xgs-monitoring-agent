@@ -1,8 +1,11 @@
 import { execFileSync } from "node:child_process";
 import { isIP } from "node:net";
 import { pathToFileURL } from "node:url";
+import { dirname, join } from "node:path";
 import { loadAgentConfig } from "./config.js";
 import { loadAgentState } from "./state.js";
+import { reportAgentError } from "./error-reporting.js";
+import { reportAgentDebug } from "./debug-reporting.js";
 
 const FAIL2BAN_JAIL = "xgs-monitor-agent";
 const REQUEST_TIMEOUT_MS = 10_000;
@@ -12,10 +15,15 @@ const MAX_BANS_PER_BATCH = 100;
 export interface SshBanPolicy {
   enabled: boolean;
   revision: number;
-  bans: Array<{ sourceIp: string; expiresAtMs: number }>;
+  bans: Array<{ sourceIp: string; expiresAtMs: number | null }>;
+  debugEnabled?: boolean;
 }
 
 type Fail2banRunner = (args: string[]) => string;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
 function canonicalIpAddress(value: string): string {
   const version = isIP(value);
@@ -35,9 +43,7 @@ export function validateSshBanPolicy(
   if (
     !Number.isSafeInteger(now) ||
     now < 1 ||
-    typeof value !== "object" ||
-    value === null ||
-    Array.isArray(value) ||
+    !isRecord(value) ||
     !("status" in value) ||
     value.status !== "ok" ||
     !("enabled" in value) ||
@@ -49,8 +55,12 @@ export function validateSshBanPolicy(
     !("bans" in value) ||
     !Array.isArray(value.bans) ||
     value.bans.length > 10_000 ||
+    ("debugEnabled" in value && typeof value.debugEnabled !== "boolean") ||
     Object.keys(value).some(
-      (key) => !["status", "enabled", "revision", "bans"].includes(key),
+      (key) =>
+        !["status", "enabled", "revision", "bans", "debugEnabled"].includes(
+          key,
+        ),
     )
   ) {
     throw new TypeError("Central returned an invalid SSH ban policy");
@@ -68,10 +78,11 @@ export function validateSshBanPolicy(
       !("sourceIp" in entry) ||
       typeof entry.sourceIp !== "string" ||
       !("expiresAtMs" in entry) ||
-      typeof entry.expiresAtMs !== "number" ||
-      !Number.isSafeInteger(entry.expiresAtMs) ||
-      entry.expiresAtMs < 1 ||
-      entry.expiresAtMs > now + MAX_BAN_TTL_MS
+      (entry.expiresAtMs !== null &&
+        (typeof entry.expiresAtMs !== "number" ||
+          !Number.isSafeInteger(entry.expiresAtMs) ||
+          entry.expiresAtMs < 1 ||
+          entry.expiresAtMs > now + MAX_BAN_TTL_MS))
     ) {
       throw new TypeError("Central returned an invalid SSH ban");
     }
@@ -87,6 +98,9 @@ export function validateSshBanPolicy(
     enabled: value.enabled,
     revision: value.revision,
     bans,
+    ...(typeof value.debugEnabled === "boolean"
+      ? { debugEnabled: value.debugEnabled }
+      : {}),
   };
 }
 
@@ -156,17 +170,18 @@ export function syncFail2banPolicy(
   }
 
   const desired = new Set<string>();
-  if (policy.enabled) {
-    for (const ban of policy.bans) {
-      if (ban.expiresAtMs <= now) {
-        continue;
-      }
-      const sourceIp = canonicalIpAddress(ban.sourceIp);
-      if (ban.expiresAtMs > now + MAX_BAN_TTL_MS) {
-        throw new TypeError("Policy ban exceeds the maximum allowed duration");
-      }
-      desired.add(sourceIp);
+  for (const ban of policy.bans) {
+    if (ban.expiresAtMs !== null && ban.expiresAtMs <= now) {
+      continue;
     }
+    const sourceIp = canonicalIpAddress(ban.sourceIp);
+    if (
+      ban.expiresAtMs !== null &&
+      ban.expiresAtMs > now + MAX_BAN_TTL_MS
+    ) {
+      throw new TypeError("Policy ban exceeds the maximum allowed duration");
+    }
+    desired.add(sourceIp);
   }
 
   const current = new Set(
@@ -307,38 +322,58 @@ async function run(): Promise<void> {
   if (!state.enrollmentAccepted) {
     throw new Error("Firewall sync requires a completed agent enrollment");
   }
-  const policy = await fetchSshBanPolicy(
-    config.monitorBaseUrl,
-    state.agentToken,
-  );
-  let count: number;
   try {
-    const ports = parseSshPorts(process.env.XGS_MONITOR_SSH_PORTS);
-    count = syncFail2banPolicy(policy, ports, Date.now());
-  } catch (error) {
+    const policy = await fetchSshBanPolicy(
+      config.monitorBaseUrl,
+      state.agentToken,
+    );
+    state.debugEnabled = policy.debugEnabled === true;
+    let count: number;
     try {
-      await reportPolicyStatus(config.monitorBaseUrl, state.agentToken, {
-        policyRevision: policy.revision,
-        status: "failed",
-        activeBanCount: 0,
-        errorCode: firewallSyncErrorCode(error),
-      });
-    } catch (reportError) {
-      console.error(
-        "Could not report SSH ban sync failure",
-        firewallSyncErrorCode(reportError),
-      );
+      const ports = parseSshPorts(process.env.XGS_MONITOR_SSH_PORTS);
+      count = syncFail2banPolicy(policy, ports, Date.now());
+    } catch (syncError) {
+      try {
+        await reportPolicyStatus(config.monitorBaseUrl, state.agentToken, {
+          policyRevision: policy.revision,
+          status: "failed",
+          activeBanCount: 0,
+          errorCode: firewallSyncErrorCode(syncError),
+        });
+      } catch (reportError) {
+        console.error(
+          "Could not report SSH ban sync failure",
+          firewallSyncErrorCode(reportError),
+        );
+      }
+      throw syncError;
     }
+    await reportPolicyStatus(config.monitorBaseUrl, state.agentToken, {
+      policyRevision: policy.revision,
+      status: "applied",
+      activeBanCount: count,
+    });
+    await reportAgentDebug(
+      join(dirname(config.stateFilePath), "errors.jsonl"),
+      config.monitorBaseUrl,
+      state,
+      "ssh_autoban_policy_sync",
+    );
+    console.info(
+      `SSH firewall policy revision ${policy.revision} synchronized; ${count} active ban(s).`,
+    );
+  } catch (error) {
+    await reportAgentError(
+      join(dirname(config.stateFilePath), "errors.jsonl"),
+      config.monitorBaseUrl,
+      state,
+      "ssh_autoban_sync",
+      Object.assign(new Error("SSH autoban policy sync failed"), {
+        code: firewallSyncErrorCode(error),
+      }),
+    );
     throw error;
   }
-  await reportPolicyStatus(config.monitorBaseUrl, state.agentToken, {
-    policyRevision: policy.revision,
-    status: "applied",
-    activeBanCount: count,
-  });
-  console.info(
-    `SSH firewall policy revision ${policy.revision} synchronized; ${count} active ban(s).`,
-  );
 }
 
 if (

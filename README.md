@@ -73,6 +73,13 @@ only an operation name, a sanitized error code, and a timestamp—not raw error
 messages or credentials. The local file is capped at 1 MiB with one rotated
 copy; it remains available if the central server cannot be reached.
 
+When Monitoring debug mode is enabled for a server, the agent also sends
+allowlisted structured operation events to the central diagnostics receiver.
+Metrics-upload events include only the sample time, CPU usage, memory use, and
+root-filesystem use; they omit mount names, device details, application logs,
+secrets, and environment data. Debug events are not sent while server debug mode
+is disabled.
+
 Telemetry includes CPU utilization/load, memory and swap, per-filesystem space
 and inode usage, uptime, OS/kernel version, CPU and block-device inventory,
 agent version, boot ID, Docker daemon state when installed, and optional
