@@ -17,6 +17,10 @@ test("updater is executable, syntactically valid, and checks before restarting",
   const source = readFileSync(updaterPath, "utf8");
   assert.match(source, /--rebuild-current/);
   assert.match(source, /--disable-ban-sync/);
+  assert.match(source, /--upgrade-to-v2/);
+  assert.match(source, /xgs-monitor-agent-v2\.migrated/);
+  assert.match(source, /if \[\[ -f "\$V2_MIGRATION_MARKER" \]\]; then/);
+  assert.match(source, /migrate-agent-v1-to-v2-host\.sh/);
   assert.match(source, /xgs-monitor-agent-ban-sync\.disabled/);
   assert.match(source, /install-ban-sync\.sh" --remove/);
   assert.match(source, /git -C "\$REPOSITORY_DIR" fetch origin main/);
@@ -57,4 +61,8 @@ test("updater is executable, syntactically valid, and checks before restarting",
       source.indexOf('systemctl restart "$SERVICE_NAME"'),
   );
   assert.match(source, /git -C "\$REPOSITORY_DIR" status --porcelain/);
+  const migrationCall = source.indexOf('run_step "Migrating V1 agent to V2"');
+  assert.ok(migrationCall > source.indexOf('run_step "Applying update"'));
+  assert.ok(migrationCall < source.indexOf('run_step "Installing dependencies"'));
+  assert.match(source, /XGS_MONITOR_AGENT_UPDATE_LOCK_HELD=1/);
 });

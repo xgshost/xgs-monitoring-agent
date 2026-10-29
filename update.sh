@@ -8,6 +8,8 @@ readonly BAN_SYNC_TIMER="xgs-monitor-agent-firewall-sync.timer"
 readonly BAN_SYNC_DISABLED_MARKER="/etc/xgs-monitor-agent-ban-sync.disabled"
 readonly BAN_JAIL_CONFIG="/etc/fail2ban/jail.d/xgs-monitor-agent.conf"
 readonly DEFAULT_SSH_JAIL_OVERRIDE="/etc/fail2ban/jail.d/xgs-monitor-agent.local"
+readonly V2_MIGRATION_MARKER="/etc/xgs-monitor-agent-v2.migrated"
+readonly V2_MIGRATION_SCRIPT="/containers/XGS CONTROL V2.0/deploy/migrate-agent-v1-to-v2-host.sh"
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 source "$SCRIPT_DIR/update-sudoers.sh"
 
@@ -31,12 +33,15 @@ BANNER
 
 rebuild_current=false
 disable_ban_sync=false
+upgrade_to_v2=false
 if [[ "$#" -eq 1 && "$1" == "--disable-ban-sync" ]]; then
   disable_ban_sync=true
 elif [[ "$#" -eq 1 && "$1" == "--rebuild-current" ]]; then
   rebuild_current=true
+elif [[ "$#" -eq 1 && "$1" == "--upgrade-to-v2" ]]; then
+  upgrade_to_v2=true
 elif [[ "$#" -ne 0 ]]; then
-  printf 'XGS Monitoring Agent updater: usage: sudo %s [--rebuild-current | --disable-ban-sync]\n' "$0" >&2
+  printf 'XGS Monitoring Agent updater: usage: sudo %s [--rebuild-current | --disable-ban-sync | --upgrade-to-v2]\n' "$0" >&2
   exit 2
 fi
 
@@ -45,6 +50,11 @@ print_banner "updater"
 if [[ ${EUID} -ne 0 ]]; then
   printf 'XGS Monitoring Agent updater: run with sudo: sudo %s\n' "$0" >&2
   exit 1
+fi
+
+if [[ -f "$V2_MIGRATION_MARKER" ]]; then
+  printf 'V2 migration is complete; V2 HTTPS releases now manage agent updates.\n'
+  exit 0
 fi
 
 if [[ ! -d "${REPOSITORY_DIR}/.git" ]]; then
@@ -149,7 +159,8 @@ if [[ -f "$SUCCESS_MARKER" ]]; then
 fi
 if [[ "$current_commit" == "$available_commit" &&
   "$successful_commit" == "$current_commit" &&
-  "$rebuild_current" != true ]]; then
+  "$rebuild_current" != true &&
+  "$upgrade_to_v2" != true ]]; then
   update_ban_sync_if_ufw_active
   printf 'Already up to date (%s).\n' "${current_commit:0:7}"
   exit 0
@@ -162,6 +173,19 @@ if ! git -C "$REPOSITORY_DIR" merge-base --is-ancestor \
 fi
 
 run_step "Applying update" git -C "$REPOSITORY_DIR" merge --ff-only "$available_commit"
+
+if [[ "$upgrade_to_v2" == true ]]; then
+  if [[ ! -f "$V2_MIGRATION_SCRIPT" ]]; then
+    printf 'XGS Monitoring Agent updater: V2 migration script not found: %s\n' \
+      "$V2_MIGRATION_SCRIPT" >&2
+    exit 1
+  fi
+  run_step "Migrating V1 agent to V2" env \
+    XGS_MONITOR_AGENT_UPDATE_LOCK_HELD=1 \
+    bash "$V2_MIGRATION_SCRIPT"
+  printf 'V2 migration complete; authenticated HTTPS releases now manage updates.\n'
+  exit 0
+fi
 
 (
   cd "$REPOSITORY_DIR"
