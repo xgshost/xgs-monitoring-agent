@@ -33,7 +33,7 @@ BANNER
 
 rebuild_current=false
 disable_ban_sync=false
-upgrade_to_v2=false
+upgrade_to_v2=true
 if [[ "$#" -eq 1 && "$1" == "--disable-ban-sync" ]]; then
   disable_ban_sync=true
 elif [[ "$#" -eq 1 && "$1" == "--rebuild-current" ]]; then

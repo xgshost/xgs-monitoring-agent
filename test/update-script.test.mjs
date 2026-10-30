@@ -15,6 +15,10 @@ test("updater is executable, syntactically valid, and checks before restarting",
   assert.equal(syntaxCheck.status, 0, syntaxCheck.stderr);
 
   const source = readFileSync(updaterPath, "utf8");
+  assert.match(
+    source,
+    /rebuild_current=false\s+disable_ban_sync=false\s+upgrade_to_v2=true/,
+  );
   assert.match(source, /--rebuild-current/);
   assert.match(source, /--disable-ban-sync/);
   assert.match(source, /--upgrade-to-v2/);
