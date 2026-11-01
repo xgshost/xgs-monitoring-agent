@@ -36,7 +36,7 @@ test("updater is executable, syntactically valid, and checks before restarting",
   assert.doesNotMatch(source, /\/containers\/XGS CONTROL V2\.0/);
   assert.match(source, /--remove-v1-after-install/);
   assert.match(source, /systemd-run/);
-  assert.match(source, /--property=ProtectSystem=full/);
+  assert.match(source, /--property=ProtectSystem=true/);
   assert.match(source, /XGS_MONITOR_AGENT_UPDATE_LOCK_HELD:-/);
   assert.match(source, /XGS_MONITOR_AGENT_UPDATE_LOCK_HELD=1/);
   assert.match(source, /xgs-monitor-agent-ban-sync\.disabled/);

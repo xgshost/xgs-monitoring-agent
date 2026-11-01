@@ -218,7 +218,7 @@ if [[ "$upgrade_to_v2" == true ]]; then
     --property=Type=oneshot \
     --property=User=root \
     --property=Group=root \
-    --property=ProtectSystem=full \
+    --property=ProtectSystem=true \
     --property=ProtectHome=true \
     --property=PrivateTmp=true \
     --property=ProtectKernelTunables=true \
