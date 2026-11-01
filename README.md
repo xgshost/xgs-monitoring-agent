@@ -199,6 +199,25 @@ then run the newly installed updater once more with sudo to create the rule.
 The second run provisions it even if the agent is already up to date; future
 no-argument updater runs can use the new rule.
 
+## Migrate V1 installations to V2
+
+The current V1 updater migrates to V2 during a normal update. It uses the
+migration script, V2 systemd units, and built agent bundle shipped in this
+repository; it does not depend on a separate workspace path. After V2's local
+service, timer, bundle, and API-health checks pass, the updater removes the V1
+checkout, state, environment, update units, sudoers rule, and rollback files.
+
+V2 enrollment still requires staff approval in Discord before it can send
+heartbeats. The updater does not wait for that approval before removing V1, so
+coordinate approval with each migration to avoid a monitoring gap. If the V1
+firewall-autoban sync service or timer is installed, automatic migration
+refuses to proceed rather than removing or disabling that separate feature.
+Handle that feature explicitly before retrying migration.
+
+If the optional V1 automatic-update timer is enabled, its next run can trigger
+this migration as well. Schedule rollout timing and Discord approval capacity
+accordingly.
+
 ## Optional automatic updates
 
 Automatic updates are disabled by default. To opt in to a daily check with a

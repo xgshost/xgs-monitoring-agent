@@ -9,7 +9,10 @@ readonly BAN_SYNC_DISABLED_MARKER="/etc/xgs-monitor-agent-ban-sync.disabled"
 readonly BAN_JAIL_CONFIG="/etc/fail2ban/jail.d/xgs-monitor-agent.conf"
 readonly DEFAULT_SSH_JAIL_OVERRIDE="/etc/fail2ban/jail.d/xgs-monitor-agent.local"
 readonly V2_MIGRATION_MARKER="/etc/xgs-monitor-agent-v2.migrated"
-readonly V2_MIGRATION_SCRIPT="/containers/XGS CONTROL V2.0/deploy/migrate-agent-v1-to-v2-host.sh"
+readonly V2_MIGRATION_SCRIPT="${REPOSITORY_DIR}/deploy/migrate-agent-v1-to-v2-host.sh"
+readonly V2_AGENT_DIST_DIR="${REPOSITORY_DIR}/deploy/v2-agent-dist"
+readonly V2_RELEASE_VERSION="2.0.0"
+readonly UPDATE_LOCK_FILE="/run/lock/xgs-monitor-agent-update.lock"
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 source "$SCRIPT_DIR/update-sudoers.sh"
 
@@ -73,17 +76,25 @@ if [[ -n "$(git -C "$REPOSITORY_DIR" status --porcelain)" ]]; then
   exit 1
 fi
 
-for command in git npm systemctl flock; do
+for command in git npm systemctl systemd-run flock; do
   if ! command -v "$command" >/dev/null 2>&1; then
     printf 'XGS Monitoring Agent updater: required command not found: %s\n' "$command" >&2
     exit 1
   fi
 done
 
-exec 9>/run/lock/xgs-monitor-agent-update.lock
-if ! flock -n 9; then
-  printf 'Update already running; skipped.\n'
-  exit 0
+if [[ "${XGS_MONITOR_AGENT_UPDATE_LOCK_HELD:-}" == "1" ]]; then
+  lock_target="$(readlink -f /proc/self/fd/9 2>/dev/null || true)"
+  if [[ "$lock_target" != "$UPDATE_LOCK_FILE" ]] || ! flock -n 9; then
+    printf 'XGS Monitoring Agent updater: inherited update lock is unavailable.\n' >&2
+    exit 1
+  fi
+else
+  exec 9>"$UPDATE_LOCK_FILE"
+  if ! flock -n 9; then
+    printf 'Update already running; skipped.\n'
+    exit 0
+  fi
 fi
 
 ensure_update_sudoers_rule
@@ -174,16 +185,55 @@ fi
 
 run_step "Applying update" git -C "$REPOSITORY_DIR" merge --ff-only "$available_commit"
 
+if [[ "$current_commit" != "$available_commit" ]]; then
+  printf 'Updater refreshed to %s; continuing with the new version.\n' \
+    "${available_commit:0:7}"
+  update_args=()
+  [[ "$rebuild_current" == true ]] && update_args+=(--rebuild-current)
+  [[ "$upgrade_to_v2" == true ]] && update_args+=(--upgrade-to-v2)
+  XGS_MONITOR_AGENT_UPDATE_LOCK_HELD=1 \
+    "$REPOSITORY_DIR/update.sh" "${update_args[@]}" || exit $?
+  exit 0
+fi
+
 if [[ "$upgrade_to_v2" == true ]]; then
   if [[ ! -f "$V2_MIGRATION_SCRIPT" ]]; then
     printf 'XGS Monitoring Agent updater: V2 migration script not found: %s\n' \
       "$V2_MIGRATION_SCRIPT" >&2
     exit 1
   fi
-  run_step "Migrating V1 agent to V2" env \
-    XGS_MONITOR_AGENT_UPDATE_LOCK_HELD=1 \
-    bash "$V2_MIGRATION_SCRIPT"
-  printf 'V2 migration complete; authenticated HTTPS releases now manage updates.\n'
+  if [[ ! -s "$V2_AGENT_DIST_DIR/index.js" ]]; then
+    printf 'XGS Monitoring Agent updater: V2 agent bundle not found: %s\n' \
+      "$V2_AGENT_DIST_DIR" >&2
+    exit 1
+  fi
+  server_name="$(hostname -f)" ||
+    { printf 'XGS Monitoring Agent updater: could not determine the system FQDN.\n' >&2; exit 1; }
+  run_step "Migrating V1 agent to V2" systemd-run \
+    --quiet \
+    --wait \
+    --collect \
+    --pipe \
+    --unit=xgs-monitor-agent-v2-migration \
+    --property=Type=oneshot \
+    --property=User=root \
+    --property=Group=root \
+    --property=ProtectSystem=full \
+    --property=ProtectHome=true \
+    --property=PrivateTmp=true \
+    --property=ProtectKernelTunables=true \
+    --property=ProtectControlGroups=true \
+    --property=LockPersonality=true \
+    /usr/bin/env XGS_MONITOR_AGENT_UPDATE_LOCK_HELD=1 \
+    /bin/bash "$V2_MIGRATION_SCRIPT" install \
+    --agent-dist-dir "$V2_AGENT_DIST_DIR" \
+    --server-name "$server_name" \
+    --release-version "$V2_RELEASE_VERSION" \
+    --remove-v1-after-install
+  if enrollment_line="$(grep -m1 '^XGS Monitoring enrollment request ' "$output_log")"; then
+    printf '%s\n' "$enrollment_line"
+  fi
+  printf 'V2 migration complete. Approve the enrollment in Discord if it is still pending.\n'
   exit 0
 fi
 

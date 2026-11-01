@@ -1,0 +1,24 @@
+[Unit]
+Description=Check for XGS Monitoring V2 Agent updates (in-place migration)
+After=network-online.target xgs-monitor-agent.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=xgs-monitor-agent
+Group=xgs-monitor-agent
+EnvironmentFile=/etc/xgs-monitor-agent-v2.env
+StateDirectory=xgs-monitor-agent-v2
+StateDirectoryMode=0700
+WorkingDirectory=/opt/xgs-monitor-agent-v2
+ExecStart=/usr/bin/node --preserve-symlinks-main /opt/xgs-monitor-agent-v2/current/index.js update
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+RestrictSUIDSGID=true
+ReadWritePaths=/var/lib/xgs-monitor-agent-v2 /opt/xgs-monitor-agent-v2

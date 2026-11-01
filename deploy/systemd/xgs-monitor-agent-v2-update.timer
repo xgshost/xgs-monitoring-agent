@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily randomized XGS Monitoring V2 Agent update check
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=30m
+Persistent=true
+Unit=xgs-monitor-agent-v2-update.service
+
+[Install]
+WantedBy=timers.target
