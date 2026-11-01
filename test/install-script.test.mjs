@@ -126,6 +126,10 @@ test("ban installer migrates to Fail2ban/UFW with explicit confirmation", () => 
   assert.match(source, /assume_yes=true/);
   assert.match(source, /--remove/);
   assert.match(source, /xgs-monitor-agent-ban-sync\.disabled/);
+  assert.match(
+    source,
+    /No XGS firewall synchronization artifacts were found; nothing to remove/,
+  );
   assert.match(source, /fail2ban-client set xgs-monitor-agent unbanip/);
   assert.match(source, /nft delete table inet xgs_monitor_agent/);
   assert.match(source, /UFW defaults and unrelated rules were left unchanged/);

@@ -105,7 +105,5 @@ test("V2 migration assets are repository-local and gate V1 removal", () => {
       source.lastIndexOf("remove_v1_installation"),
   );
   assert.match(source, /verify_v2_after_v1_removal/);
-  assert.match(source, /assert_no_v1_firewall_sync/);
-  assert.match(source, /xgs-monitor-agent-firewall-sync\.service/);
-  assert.match(source, /xgs-monitor-agent-firewall-sync\.timer/);
+  assert.match(source, /install-ban-sync\.sh" --remove/);
 });

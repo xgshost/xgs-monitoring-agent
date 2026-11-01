@@ -60,6 +60,7 @@ remove_ban_sync() {
     "$UNIT_DIR/$TIMER_NAME" \
     "$FAIL2BAN_DROPIN" \
     "$JAIL_FILE" \
+    "$SSHD_OVERRIDE_FILE" \
     "$PROFILE_FILE"; do
     [[ ! -e "$file" ]] || artifacts=true
   done
@@ -75,6 +76,10 @@ remove_ban_sync() {
 
   if [[ -e "$DISABLED_MARKER" && "$artifacts" != true ]]; then
     printf 'Host SSH autoban synchronization is already disabled and removed.\n'
+    return 0
+  fi
+  if [[ ! -e "$DISABLED_MARKER" && "$artifacts" != true ]]; then
+    printf 'No XGS firewall synchronization artifacts were found; nothing to remove.\n'
     return 0
   fi
 

@@ -209,10 +209,11 @@ checkout, state, environment, update units, sudoers rule, and rollback files.
 
 V2 enrollment still requires staff approval in Discord before it can send
 heartbeats. The updater does not wait for that approval before removing V1, so
-coordinate approval with each migration to avoid a monitoring gap. If the V1
-firewall-autoban sync service or timer is installed, automatic migration
-refuses to proceed rather than removing or disabling that separate feature.
-Handle that feature explicitly before retrying migration.
+coordinate approval with each migration to avoid a monitoring gap. As part of
+V1 cleanup, the updater runs the existing firewall-sync removal routine. It
+backs up managed policy and firewall state under `/var/backups`, clears active
+XGS jail bans, and removes only XGS-managed firewall artifacts; UFW defaults
+and unrelated rules are left unchanged.
 
 If the optional V1 automatic-update timer is enabled, its next run can trigger
 this migration as well. Schedule rollout timing and Discord approval capacity

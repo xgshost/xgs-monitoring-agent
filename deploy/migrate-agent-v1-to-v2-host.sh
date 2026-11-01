@@ -5,12 +5,11 @@ readonly service_user="xgs-monitor-agent"
 readonly service_group="xgs-monitor-agent"
 readonly service_unit="xgs-monitor-agent.service"
 readonly legacy_update_timer="xgs-monitor-agent-update.timer"
-readonly firewall_sync_timer="xgs-monitor-agent-firewall-sync.timer"
-readonly firewall_sync_service="xgs-monitor-agent-firewall-sync.service"
 readonly legacy_environment="/etc/xgs-monitor-agent.env"
 readonly legacy_install_root="/opt/xgs-monitoring-agent"
 readonly legacy_state_directory="/var/lib/xgs-monitor-agent"
 readonly legacy_sudoers_file="/etc/sudoers.d/xgs-monitor-agent-update"
+readonly legacy_ban_sync_disabled_marker="/etc/xgs-monitor-agent-ban-sync.disabled"
 readonly install_root="/opt/xgs-monitor-agent-v2"
 readonly state_directory="/var/lib/xgs-monitor-agent-v2"
 readonly environment_file="/etc/xgs-monitor-agent-v2.env"
@@ -216,17 +215,6 @@ verify_v2_after_v1_removal() {
   printf 'V2 remains active and its Monitoring API health check passed after V1 removal.\n'
 }
 
-assert_no_v1_firewall_sync() {
-  local path
-  for path in \
-    "$unit_directory/$firewall_sync_service" \
-    "$unit_directory/$firewall_sync_timer"; do
-    if [[ -e "$path" || -L "$path" ]]; then
-      fail "V1 firewall autoban sync is installed at $path; refusing to remove V1 until that feature is handled separately."
-    fi
-  done
-}
-
 remove_v1_sudoers_rule() {
   local temporary_file backup_file
   [[ -e "$legacy_sudoers_file" || -L "$legacy_sudoers_file" ]] || return 0
@@ -277,7 +265,12 @@ remove_v1_sudoers_rule() {
 }
 
 remove_v1_installation() {
-  assert_no_v1_firewall_sync
+  if [[ ! -f "$legacy_install_root/install-ban-sync.sh" ]]; then
+    fail "The V1 firewall-sync removal script is missing; refusing V1 cleanup."
+  fi
+  /bin/bash "$legacy_install_root/install-ban-sync.sh" --remove ||
+    fail "Could not remove the V1 firewall autoban policy; V1 files were retained."
+  rm -f -- "$legacy_ban_sync_disabled_marker"
   if systemctl is-enabled --quiet "$legacy_update_timer"; then
     systemctl disable --now "$legacy_update_timer" ||
       fail "Could not disable the V1 update timer."
@@ -307,7 +300,6 @@ if [[ "$mode" == "cleanup" ]]; then
   fi
   check_local_v2
   [[ -e "$rollback_unit" ]] || fail "The saved V1 unit is missing; refusing cleanup."
-  assert_no_v1_firewall_sync
   if [[ ! -t 0 ]]; then
     fail "Cleanup requires an interactive terminal for the final confirmation."
   fi
@@ -346,13 +338,6 @@ case "$v1_service_state" in
     fail "The V1 monitoring service is $v1_service_state; refusing in-place replacement."
     ;;
 esac
-
-if systemctl is-active --quiet "$firewall_sync_timer"; then
-  fail "V1 firewall synchronization is active; resolve it before migrating."
-fi
-if [[ "$remove_v1_after_install" == true ]]; then
-  assert_no_v1_firewall_sync
-fi
 
 if ! id "$service_user" >/dev/null 2>&1 ||
   ! getent group "$service_group" >/dev/null; then
